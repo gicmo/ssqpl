@@ -123,7 +123,7 @@ enum
 
 /*
  * E -> T { B E }
- * T -> C | "(" E ")" | N T
+ * T -> "(" E ")" | N T | C
  * C -> F ":" V
  * B -> AND | OR
  * N -> NOT
@@ -304,14 +304,7 @@ parse_term (BoltQueryParser *parser)
 
   g_debug ("term");
 
-  r = parser_expect (parser, 3, G_TOKEN_IDENTIFIER, '(', '-');
-  if (r == -1)
-    return FALSE;
-  else if (r == 0)
-    return parse_condition (parser);
-
-  parser_next (parser);
-  if (r == 1)
+  if (parser_accept (parser, '('))
     {
       g_debug ("group");
       ok = parse_expression (parser);
@@ -328,10 +321,15 @@ parse_term (BoltQueryParser *parser)
       g_debug ("group done");
       return TRUE;
     }
-  else if (r == 2)
+  else if (parser_accept (parser, '-'))
     {
       return parse_not (parser);
     }
+  else
+    {
+      return parse_condition (parser);
+    }
+
 
   return TRUE;
 }
