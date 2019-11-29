@@ -388,25 +388,27 @@ parse_term (BoltQueryParser *parser)
 }
 
 static gboolean
-parse_operator (BoltQueryParser *parser)
+parse_or (BoltQueryParser *parser)
 {
-  gboolean ok = parser_skip (parser, ' ');
+  gboolean ok;
 
-  if (parser_accept (parser, '|'))
-    {
-      ok = TRUE;
-      g_debug ("operator OR");
-    }
-  else if ((!ok && parser_accept (parser, '&')) || ok)
-    {
-      ok = TRUE;
-      g_debug ("operator AND");
-    }
+  ok = parser_expect (parser, '|');
+  if (!ok)
+    return FALSE;
 
-  if (ok)
-    parser_skip (parser, ' ');
+  g_debug ("operator OR");
 
   return ok;
+}
+
+static gboolean
+parse_and (BoltQueryParser *parser)
+{
+  parser_accept (parser, '&');
+
+  g_debug ("operator AND");
+
+  return TRUE;
 }
 
 static gboolean
@@ -420,11 +422,19 @@ parse_expression (BoltQueryParser *parser)
   if (!ok)
     return FALSE;
 
-  /* NB: not getting an operator is not an
-   * error, just means we are done here */
-  ok = parse_operator (parser);
-  if (!ok)
+  ok = parser_skip (parser, ' ');
+
+  if (parser_check (parser, '|'))
+    ok = parse_or (parser);
+  else if (parser_check (parser, '&') || ok)
+    ok = parse_and (parser);
+  else
     return TRUE;
+
+  if (!ok)
+    return FALSE;
+
+  parser_skip (parser, ' ');
 
   return parse_expression (parser);
 }
