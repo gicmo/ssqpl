@@ -213,6 +213,38 @@ parser_accept (BoltQueryParser *parser, int token)
   return TRUE;
 }
 
+/**
+ * parser_skip:
+ * @parser: The parser.
+ * @token: Target token to skip.
+ *
+ * Skip any number of @token.
+ *
+ * Returns: %TRUE if any token were skipped.
+ **/
+static gboolean
+parser_skip (BoltQueryParser *parser, int token)
+{
+  GTokenType next;
+  int count = 0;
+
+  while ((int) (next = parser_peek (parser)) == token)
+    {
+      next = parser_next (parser);
+
+      if ((int) next != token)
+        {
+          g_warning ("internal parser error");
+          break;
+        }
+
+      count++;
+    }
+
+  return count > 0;
+}
+
+
 static gboolean
 parse_value (BoltQueryParser *parser, GValue *value)
 {
