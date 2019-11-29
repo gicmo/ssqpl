@@ -458,31 +458,34 @@ parser_check (BoltQueryParser *parser, int token)
 
 /* production rules */
 static gboolean
-parse_value (BoltQueryParser *parser, GValue *value)
+parse_value (BoltQueryParser *parser, GValue *val)
 {
-  GTokenType token;
+  GTokenType  token;
+  GTokenValue *value;
 
   token = parser_next (parser);
+  value = &parser->scanner->value;
 
   switch (token)
     {
     case G_TOKEN_INT:
-      g_value_init (value, G_TYPE_INT64);
-      g_value_set_int64 (value, parser->scanner->value.v_int64);
+      g_value_init (val, G_TYPE_INT64);
+      g_value_set_int64 (val, value->v_int64);
       return TRUE;
 
     case G_TOKEN_STRING:
-      g_value_init (value, G_TYPE_STRING);
-      g_value_set_string (value, parser->scanner->value.v_string);
+      g_value_init (val, G_TYPE_STRING);
+      g_value_set_string (val, value->v_string);
       return TRUE;
 
     case G_TOKEN_IDENTIFIER:
-      g_value_init (value, G_TYPE_STRING);
-      g_value_set_string (value, parser->scanner->value.v_identifier);
+      g_value_init (val, G_TYPE_STRING);
+      g_value_set_string (val, value->v_identifier);
       return TRUE;
 
     default:
-      g_set_error (&parser->error, G_MARKUP_ERROR, G_MARKUP_ERROR_PARSE,
+      g_set_error (&parser->error,
+                   G_MARKUP_ERROR, G_MARKUP_ERROR_PARSE,
                    "malformed input @ %u: unexpected token: %u",
                    parser->scanner->position, token);
     }
