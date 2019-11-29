@@ -170,7 +170,7 @@ parser_expect (BoltQueryParser *parser, int token)
   if (parser->error != NULL)
     return FALSE;
 
-  next = parser_next (parser);
+  next = g_scanner_get_next_token (parser->scanner);
 
   if ((int) next == token)
     return TRUE;
@@ -355,6 +355,28 @@ parse_term (BoltQueryParser *parser)
 }
 
 static gboolean
+parse_operator (BoltQueryParser *parser)
+{
+  gboolean ok = parser_skip (parser, ' ');
+
+  if (parser_accept (parser, '|'))
+    {
+      ok = TRUE;
+      g_debug ("operator OR");
+    }
+  else if ((!ok && parser_accept (parser, '&')) || ok)
+    {
+      ok = TRUE;
+      g_debug ("operator AND");
+    }
+
+  if (ok)
+    parser_skip (parser, ' ');
+
+  return ok;
+}
+
+static gboolean
 parse_expression (BoltQueryParser *parser)
 {
   gboolean ok;
@@ -365,10 +387,11 @@ parse_expression (BoltQueryParser *parser)
   if (!ok)
     return FALSE;
 
-  if (!parser_skip (parser, ' '))
+  /* NB: not getting an operator is not an
+   * error, just means we are done here */
+  ok = parse_operator (parser);
+  if (!ok)
     return TRUE;
-
-  g_debug ("expression op");
 
   return parse_expression (parser);
 }
