@@ -131,6 +131,10 @@ typedef enum {
 typedef struct Expr Expr;
 typedef struct ExprClass ExprClass;
 
+typedef struct Condition Condition;
+typedef struct Unary Unary;
+typedef struct Binary Binary;
+
 typedef void   (*ExprDump) (Expr *expr, FILE *out);
 typedef Expr * (*ExprFree) (Expr *expr);
 
@@ -211,12 +215,12 @@ static ExprClass ConditionClass =
  .free = condition_free,
 };
 
-static struct Condition *
+static Condition *
 condition_new (void)
 {
-  struct Condition *c;
+  Condition *c;
 
-  c = g_slice_new0 (struct Condition);
+  c = g_slice_new0 (Condition);
   c->expr.klass = &ConditionClass;
 
   return c;
@@ -236,9 +240,9 @@ unary_dump (Expr *exp, FILE *out)
 static Expr *
 unary_free (Expr *exp)
 {
-  struct Unary *u;
+  Unary *u;
 
-  u = (struct Unary *) exp;
+  u = (Unary *) exp;
 
   u->rhs = expression_free (u->rhs);
   g_slice_free (struct Unary, u);
@@ -252,12 +256,12 @@ static ExprClass UnaryClass =
  .free = unary_free,
 };
 
-static struct Unary *
+static Unary *
 unary_new (int op)
 {
-  struct Unary *u;
+  Unary *u;
 
-  u = g_slice_new0 (struct Unary);
+  u = g_slice_new0 (Unary);
   u->expr.klass = &UnaryClass;
   u->op = op;
 
@@ -268,7 +272,7 @@ unary_new (int op)
 static void
 binary_dump (Expr *exp, FILE *out)
 {
-  struct Binary *b = (struct Binary *) exp;
+  Binary *b = (Binary *) exp;
 
   g_fprintf (out, "(");
   expression_dump (b->lhs, out);
@@ -280,11 +284,11 @@ binary_dump (Expr *exp, FILE *out)
 static Expr *
 binary_free (Expr *exp)
 {
-  struct Binary *b = (struct Binary *) exp;
+  Binary *b = (Binary *) exp;
 
   b->lhs = expression_free (b->lhs);
   b->rhs = expression_free (b->rhs);
-  g_slice_free (struct Binary, b);
+  g_slice_free (Binary, b);
 
   return NULL;
 }
@@ -295,12 +299,12 @@ static ExprClass BinaryClass =
  .free = binary_free,
 };
 
-static struct Binary*
+static Binary*
 binary_new (int op)
 {
-  struct Binary *b;
+  Binary *b;
 
-  b = g_slice_new0 (struct Binary);
+  b = g_slice_new0 (Binary);
   b->expr.klass = &BinaryClass;
   b->op = op;
 
@@ -493,7 +497,7 @@ static Expr * parse_expression (BoltQueryParser *parser);
 static Expr *
 parse_condition (BoltQueryParser *parser)
 {
-  struct Condition *c = condition_new ();
+  Condition *c = condition_new ();
   gboolean ok;
 
   g_debug ("condition");
@@ -520,7 +524,7 @@ parse_condition (BoltQueryParser *parser)
 static Expr *
 parse_not (BoltQueryParser *parser)
 {
-  struct Unary *op;
+  Unary *op;
   Expr *exp = NULL;
   gboolean ok;
 
@@ -607,7 +611,7 @@ parse_and (BoltQueryParser *parser)
 static Expr *
 parse_expression (BoltQueryParser *parser)
 {
-  struct Binary *b;
+  Binary *b;
   Expr *op = NULL;
   Expr *lhs = NULL;
   Expr *rhs = NULL;
