@@ -200,7 +200,7 @@ parser_accept (BoltQueryParser *parser, int token)
   if (parser->error != NULL)
     return FALSE;
 
-  next = parser_peek (parser);
+  next = g_scanner_peek_next_token (parser->scanner);
 
   if ((int) next != token)
     return FALSE;
