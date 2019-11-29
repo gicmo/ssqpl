@@ -186,6 +186,37 @@ parser_expect (BoltQueryParser *parser, guint n, ...)
   return -1;
 }
 
+/**
+ * parser_accept:
+ * @parser: The parser
+ * @token: Token to optionally consume
+ *
+ * Parser will peek the next token and if it matches @token
+ * will consume it.
+ *
+ * Returns: %TRUE if @token was found and consumed.
+ **/
+static gboolean
+parser_accept (BoltQueryParser *parser, int token)
+{
+  GTokenType next;
+
+  if (parser->error != NULL)
+    return FALSE;
+
+  next = parser_peek (parser);
+
+  if ((int) next != token)
+    return FALSE;
+
+  next = parser_next (parser);
+
+  if ((int) next != token)
+    g_warning ("internal parser error");
+
+  return TRUE;
+}
+
 static gboolean
 parse_value (BoltQueryParser *parser, GValue *value)
 {
