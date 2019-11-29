@@ -336,6 +336,12 @@ static gboolean parse_term (BoltQueryParser *parser);
 static gboolean
 parse_not (BoltQueryParser *parser)
 {
+  gboolean ok;
+
+  ok = parser_expect (parser, '-');
+  if (!ok)
+    return FALSE;
+
   g_debug ("not");
   return parse_term (parser);
 }
@@ -346,6 +352,10 @@ static gboolean
 parse_group (BoltQueryParser *parser)
 {
   gboolean ok;
+
+  ok = parser_expect (parser, '(');
+  if (!ok)
+    return FALSE;
 
   g_debug ("group");
   ok = parse_expression (parser);
@@ -367,9 +377,9 @@ parse_term (BoltQueryParser *parser)
 {
   g_debug ("term");
 
-  if (parser_accept (parser, '('))
+  if (parser_check (parser, '('))
     return parse_group (parser);
-  else if (parser_accept (parser, '-'))
+  else if (parser_check (parser, '-'))
     return parse_not (parser);
   else
     return parse_condition (parser);
