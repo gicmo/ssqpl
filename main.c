@@ -340,6 +340,12 @@ parser_next (BoltQueryParser *parser)
   return g_scanner_get_next_token (parser->scanner);
 }
 
+static inline GTokenValue *
+parser_value (BoltQueryParser *parser)
+{
+  return &parser->scanner->value;
+}
+
 /**
  * parser_expect:
  * @parser: The parser
@@ -464,7 +470,7 @@ parse_value (BoltQueryParser *parser, GValue *val)
   GTokenValue *value;
 
   token = parser_next (parser);
-  value = &parser->scanner->value;
+  value = parser_value (parser);
 
   switch (token)
     {
@@ -508,7 +514,7 @@ parse_condition (BoltQueryParser *parser)
   if (!ok)
     return NULL;
 
-  c->field = g_strdup (parser->scanner->value.v_identifier);
+  c->field = g_strdup (parser_value (parser)->v_identifier);
 
   ok = parser_expect (parser, ':');
 
