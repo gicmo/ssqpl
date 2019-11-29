@@ -365,7 +365,7 @@ parse_expression (BoltQueryParser *parser)
   if (!ok)
     return FALSE;
 
-  if (!parser_accept (parser, ' '))
+  if (!parser_skip (parser, ' '))
     return TRUE;
 
   g_debug ("expression op");
