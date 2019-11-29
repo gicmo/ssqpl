@@ -123,7 +123,8 @@ enum
 
 /*
  * E -> T { B E }
- * T -> "(" E ")" | N T | C
+ * T -> G | N T | C
+ * G -> "(" E ")"
  * C -> F ":" V
  * B -> AND | OR
  * N -> NOT
@@ -150,40 +151,35 @@ parser_next (BoltQueryParser *parser)
   return g_scanner_get_next_token (parser->scanner);
 }
 
-static int
-parser_expect (BoltQueryParser *parser, guint n, ...)
+/**
+ * parser_expect:
+ * @parser: The parser
+ * @token: The expected Token
+ *
+ * Parser will advance and compare the next token to
+ * the target @token. If it does not match will put
+ * the parser into the error state and return %FALSE
+ *
+ * Returns: %TRUE if @token was found.
+ **/
+static gboolean
+parser_expect (BoltQueryParser *parser, int token)
 {
-  GTokenType *types;
-  GTokenType token;
-  va_list args;
+  GTokenType next;
 
-  g_assert (n < 16);
+  if (parser->error != NULL)
+    return FALSE;
 
-  types = g_alloca (sizeof (GTokenType) * n);
+  next = parser_next (parser);
 
-  token = parser_peek (parser);
-
-  va_start (args, n);
-  for (guint i = 0; i < n; i++)
-    types[i] = va_arg (args, GTokenType);
-  va_end (args);
-
-#if 0
-  g_print (" expecting: ");
-  for (guint i = 0; i < n; i++)
-    g_print ("%u", types[i]);
-  g_print ("\n");
-#endif
-
-  for (guint i = 0; i < n; i++)
-    if (types[i] == token)
-      return i;
+  if ((int) next == token)
+    return TRUE;
 
   g_set_error (&parser->error, G_MARKUP_ERROR, G_MARKUP_ERROR_PARSE,
                "malformed input @ %u: unexpected token: %u",
                parser->scanner->position, token);
 
-  return -1;
+  return FALSE;
 }
 
 /**
@@ -256,24 +252,19 @@ parse_condition (BoltQueryParser *parser)
   GValue val = G_VALUE_INIT;
   gboolean ok;
   char *prop;
-  int r;
 
   g_debug ("condition");
 
-  r = parser_expect (parser, 1, G_TOKEN_IDENTIFIER);
-  if (r == -1)
+  ok = parser_expect (parser, G_TOKEN_IDENTIFIER);
+  if (!ok)
     return FALSE;
-
-  parser_next (parser);
 
   prop = g_strdup (parser->scanner->value.v_identifier);
 
-  r = parser_expect (parser, 1, ':');
+  ok = parser_expect (parser, ':');
 
-  if (r == -1)
+  if (!ok)
     return FALSE;
-
-  parser_next (parser);
 
   ok = parse_value (parser, &val);
 
@@ -297,39 +288,36 @@ parse_not (BoltQueryParser *parser)
 static gboolean parse_expression (BoltQueryParser *parser);
 
 static gboolean
-parse_term (BoltQueryParser *parser)
+parse_group (BoltQueryParser *parser)
 {
   gboolean ok;
-  int r;
 
+  g_debug ("group");
+  ok = parse_expression (parser);
+  g_debug ("group exp done: %d", (int) ok);
+
+  if (!ok)
+    return FALSE;
+
+  ok = parser_expect (parser, ')');
+  if (!ok)
+    return FALSE;
+
+  g_debug ("group done");
+  return TRUE;
+}
+
+static gboolean
+parse_term (BoltQueryParser *parser)
+{
   g_debug ("term");
 
   if (parser_accept (parser, '('))
-    {
-      g_debug ("group");
-      ok = parse_expression (parser);
-      g_debug ("group exp done: %d", (int) ok);
-
-      if (!ok)
-        return FALSE;
-
-      r = parser_expect (parser, 1, ')');
-      if (r == -1)
-        return FALSE;
-
-      parser_next (parser);
-      g_debug ("group done");
-      return TRUE;
-    }
+    return parse_group (parser);
   else if (parser_accept (parser, '-'))
-    {
-      return parse_not (parser);
-    }
+    return parse_not (parser);
   else
-    {
-      return parse_condition (parser);
-    }
-
+    return parse_condition (parser);
 
   return TRUE;
 }
@@ -361,7 +349,7 @@ parse_expression (BoltQueryParser *parser)
 }
 
 int
-main(int argc, char **argv)
+main (int argc, char **argv)
 {
   BoltQueryParser parser = {0, };
   GScanner *scanner;
@@ -382,7 +370,7 @@ main(int argc, char **argv)
   ok = parse_expression (&parser);
 
   if (ok)
-    ok = parser_expect (&parser, 1, G_TOKEN_EOF) != -1;
+    ok = parser_expect (&parser, G_TOKEN_EOF);
 
   if (!ok)
     g_printerr ("ERROR: %s\n", parser.error->message);
