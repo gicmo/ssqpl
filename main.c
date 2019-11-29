@@ -244,6 +244,29 @@ parser_skip (BoltQueryParser *parser, int token)
   return count > 0;
 }
 
+/**
+ * parser_check:
+ * @parser: The parser
+ * @token: Token to check for
+ *
+ * Parser will peek the next token and if it matches @token
+ * return %TRUE
+ *
+ * Returns: %FALSE if @token was not found.
+ **/
+static gboolean
+parser_check (BoltQueryParser *parser, int token)
+{
+  GTokenType next;
+
+  if (parser->error != NULL)
+    return FALSE;
+
+  next = g_scanner_peek_next_token (parser->scanner);
+
+  return (int) next == token;
+}
+
 
 static gboolean
 parse_value (BoltQueryParser *parser, GValue *value)
