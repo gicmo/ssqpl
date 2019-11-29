@@ -205,7 +205,7 @@ parser_accept (BoltQueryParser *parser, int token)
   if ((int) next != token)
     return FALSE;
 
-  next = parser_next (parser);
+  next = g_scanner_get_next_token (parser->scanner);
 
   if ((int) next != token)
     g_warning ("internal parser error");
@@ -325,27 +325,20 @@ parse_term (BoltQueryParser *parser)
 static gboolean
 parse_expression (BoltQueryParser *parser)
 {
-  GTokenType token;
   gboolean ok;
 
   g_debug ("expression term");
+
   ok = parse_term (parser);
   if (!ok)
     return FALSE;
 
-  token = parser_peek (parser);
-
-  if (token != ' ')
+  if (!parser_accept (parser, ' '))
     return TRUE;
 
   g_debug ("expression op");
 
-  parser_next (parser);
-  g_debug ("expression exp");
-
-  ok = parse_expression (parser);
-
-  return ok;
+  return parse_expression (parser);
 }
 
 int
