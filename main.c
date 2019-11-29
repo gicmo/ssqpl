@@ -135,8 +135,8 @@ typedef struct Condition Condition;
 typedef struct Unary Unary;
 typedef struct Binary Binary;
 
-typedef void   (*ExprDump) (Expr *expr, FILE *out);
-typedef Expr * (*ExprFree) (Expr *expr);
+typedef void (*ExprDump) (Expr *expr, FILE *out);
+typedef void (*ExprFree) (Expr *expr);
 
 struct ExprClass {
   ExprDump dump;
@@ -177,11 +177,13 @@ expression_dump (Expr *exp, FILE *out)
   exp->klass->dump (exp, out);
 }
 
-static inline Expr *
+static inline void
 expression_free (Expr *exp)
 {
-  return exp->klass->free (exp);
+  exp->klass->free (exp);
 }
+
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(Expr, expression_free)
 
 /*  */
 static void
@@ -196,7 +198,7 @@ condition_dump (Expr *exp, FILE *out)
   g_fprintf (out, "%s:%s", c->field, tmp);
 }
 
-static Expr *
+static void
 condition_free (Expr *exp)
 {
   struct Condition *c = (struct Condition *) exp;
@@ -205,8 +207,6 @@ condition_free (Expr *exp)
   g_value_unset (&c->val);
 
   g_slice_free (struct Condition, exp);
-
-  return NULL;
 }
 
 static ExprClass ConditionClass =
@@ -226,6 +226,15 @@ condition_new (void)
   return c;
 }
 
+static inline void
+condition_cleanup (Condition *c)
+{
+  condition_free ((Expr *) c);
+}
+
+
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(Condition, condition_cleanup)
+
 /*  */
 static void
 unary_dump (Expr *exp, FILE *out)
@@ -237,17 +246,15 @@ unary_dump (Expr *exp, FILE *out)
   g_fprintf (out, ")");
 }
 
-static Expr *
+static void
 unary_free (Expr *exp)
 {
   Unary *u;
 
   u = (Unary *) exp;
 
-  u->rhs = expression_free (u->rhs);
+  expression_free (u->rhs);
   g_slice_free (struct Unary, u);
-
-  return NULL;
 }
 
 static ExprClass UnaryClass =
@@ -281,16 +288,14 @@ binary_dump (Expr *exp, FILE *out)
   g_fprintf (out, ")");
 }
 
-static Expr *
+static void
 binary_free (Expr *exp)
 {
   Binary *b = (Binary *) exp;
 
-  b->lhs = expression_free (b->lhs);
-  b->rhs = expression_free (b->rhs);
+  expression_free (b->lhs);
+  expression_free (b->rhs);
   g_slice_free (Binary, b);
-
-  return NULL;
 }
 
 static ExprClass BinaryClass =
@@ -497,7 +502,7 @@ static Expr * parse_expression (BoltQueryParser *parser);
 static Expr *
 parse_condition (BoltQueryParser *parser)
 {
-  Condition *c = condition_new ();
+  g_autoptr(Condition) c = condition_new ();
   gboolean ok;
 
   g_debug ("condition");
@@ -518,7 +523,7 @@ parse_condition (BoltQueryParser *parser)
   if (!ok)
     return NULL;
 
-  return (Expr *) c;
+  return (Expr *) g_steal_pointer (&c);
 }
 
 static Expr *
@@ -547,7 +552,7 @@ parse_not (BoltQueryParser *parser)
 static Expr *
 parse_group (BoltQueryParser *parser)
 {
-  Expr *exp;
+  g_autoptr(Expr) exp = NULL;
   gboolean ok;
 
   ok = parser_expect (parser, '(');
@@ -566,7 +571,7 @@ parse_group (BoltQueryParser *parser)
     return FALSE;
 
   g_debug ("group done");
-  return exp;
+  return g_steal_pointer (&exp);
 }
 
 static Expr *
@@ -611,10 +616,10 @@ parse_and (BoltQueryParser *parser)
 static Expr *
 parse_expression (BoltQueryParser *parser)
 {
+  g_autoptr(Expr) op = NULL;
+  g_autoptr(Expr) lhs = NULL;
+  g_autoptr(Expr) rhs = NULL;
   Binary *b;
-  Expr *op = NULL;
-  Expr *lhs = NULL;
-  Expr *rhs = NULL;
   gboolean ok;
 
   g_debug ("expression term");
@@ -641,19 +646,19 @@ parse_expression (BoltQueryParser *parser)
   if (rhs == NULL)
     return NULL;
 
-  b = (struct Binary *) op;
+  b = (Binary *) op;
   b->lhs = g_steal_pointer (&lhs);
   b->rhs = g_steal_pointer (&rhs);
 
-  return (Expr *) op;
+  return (Expr *) g_steal_pointer (&op);
 }
 
 static Expr *
 parse_input (BoltQueryParser *parser,
              const char      *data)
 {
+  g_autoptr(Expr) exp = NULL;
   gboolean ok;
-  Expr *exp;
 
   g_scanner_input_text (parser->scanner, data, strlen (data));
   g_scanner_set_scope (parser->scanner, QL_SCOPE_DEFAULT);
@@ -673,7 +678,7 @@ int
 main (int argc, char **argv)
 {
   BoltQueryParser parser = {0, };
-  Expr *exp;
+  g_autoptr(Expr) exp = NULL;
   GScanner *scanner;
   BtId *id;
 
