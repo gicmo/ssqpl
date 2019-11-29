@@ -123,11 +123,6 @@ enum
 
 /* AST */
 
-typedef enum {
-  EXP_TYPE_NONE = 0,
-
-} ExprType;
-
 typedef struct Expr Expr;
 typedef struct ExprClass ExprClass;
 
@@ -144,7 +139,6 @@ struct ExprClass {
 };
 
 struct Expr {
-  ExprType   type;
   ExprClass *klass;
 };
 
