@@ -329,12 +329,6 @@ typedef struct BoltQueryParser {
 } BoltQueryParser;
 
 static inline GTokenType
-parser_peek (BoltQueryParser *parser)
-{
-  return g_scanner_peek_next_token (parser->scanner);
-}
-
-static inline GTokenType
 parser_next (BoltQueryParser *parser)
 {
   return g_scanner_get_next_token (parser->scanner);
