@@ -2,6 +2,7 @@
 
 #include <glib.h>
 #include <glib-object.h>
+#include <glib/gprintf.h>
 
 #include <string.h>
 
@@ -120,6 +121,191 @@ enum
 };
 
 
+/* AST */
+
+typedef enum {
+  EXP_TYPE_NONE = 0,
+
+} ExprType;
+
+typedef struct Expr Expr;
+typedef struct ExprClass ExprClass;
+
+typedef void   (*ExprDump) (Expr *expr, FILE *out);
+typedef Expr * (*ExprFree) (Expr *expr);
+
+struct ExprClass {
+  ExprDump dump;
+  ExprFree free;
+};
+
+struct Expr {
+  ExprType   type;
+  ExprClass *klass;
+};
+
+struct Condition {
+  Expr expr;
+
+  char *field;
+  GValue val;
+};
+
+struct Unary {
+  Expr expr;
+
+  int   op;
+  Expr *rhs;
+};
+
+struct Binary {
+  Expr expr;
+
+  int   op;
+  Expr *lhs;
+  Expr *rhs;
+};
+
+/*  */
+static inline void
+expression_dump (Expr *exp, FILE *out)
+{
+  exp->klass->dump (exp, out);
+}
+
+static inline Expr *
+expression_free (Expr *exp)
+{
+  return exp->klass->free (exp);
+}
+
+/*  */
+static void
+condition_dump (Expr *exp, FILE *out)
+{
+  g_autofree char *tmp = NULL;
+  struct Condition *c;
+
+  c = (struct Condition *) exp;
+
+  tmp = g_strdup_value_contents (&c->val);
+  g_fprintf (out, "%s:%s", c->field, tmp);
+}
+
+static Expr *
+condition_free (Expr *exp)
+{
+  struct Condition *c = (struct Condition *) exp;
+
+  g_free (c->field);
+  g_value_unset (&c->val);
+
+  g_slice_free (struct Condition, exp);
+
+  return NULL;
+}
+
+static ExprClass ConditionClass =
+{
+ .dump = condition_dump,
+ .free = condition_free,
+};
+
+static struct Condition *
+condition_new (void)
+{
+  struct Condition *c;
+
+  c = g_slice_new0 (struct Condition);
+  c->expr.klass = &ConditionClass;
+
+  return c;
+}
+
+/*  */
+static void
+unary_dump (Expr *exp, FILE *out)
+{
+  struct Unary *u = (struct Unary *) exp;
+
+  g_fprintf (out, "%c(", u->op);
+  expression_dump (u->rhs, out);
+  g_fprintf (out, ")");
+}
+
+static Expr *
+unary_free (Expr *exp)
+{
+  struct Unary *u;
+
+  u = (struct Unary *) exp;
+
+  u->rhs = expression_free (u->rhs);
+  g_slice_free (struct Unary, u);
+
+  return NULL;
+}
+
+static ExprClass UnaryClass =
+{
+ .dump = unary_dump,
+ .free = unary_free,
+};
+
+static struct Unary *
+unary_new (int op)
+{
+  struct Unary *u;
+
+  u = g_slice_new0 (struct Unary);
+  u->expr.klass = &UnaryClass;
+  u->op = op;
+
+  return u;
+}
+
+/* */
+static void
+binary_dump (Expr *exp, FILE *out)
+{
+  struct Binary *b = (struct Binary *) exp;
+
+  g_fprintf (out, "(");
+  expression_dump (b->lhs, out);
+  g_fprintf (out, "%c", b->op);
+  expression_dump (b->rhs, out);
+  g_fprintf (out, ")");
+}
+
+static Expr *
+binary_free (Expr *exp)
+{
+  struct Binary *b = (struct Binary *) exp;
+
+  b->lhs = expression_free (b->lhs);
+  b->rhs = expression_free (b->rhs);
+  g_slice_free (struct Binary, b);
+
+  return NULL;
+}
+
+static ExprClass BinaryClass =
+{
+ .dump = binary_dump,
+ .free = binary_free,
+};
+
+static struct Binary*
+binary_new (int op)
+{
+  struct Binary *b;
+
+  b = g_slice_new0 (struct Binary);
+  b->expr.klass = &BinaryClass;
+  b->op = op;
+
+  return b;
+}
 
 /*
  * E -> T { B E }
@@ -267,7 +453,7 @@ parser_check (BoltQueryParser *parser, int token)
   return (int) next == token;
 }
 
-
+/* production rules */
 static gboolean
 parse_value (BoltQueryParser *parser, GValue *value)
 {
@@ -301,56 +487,63 @@ parse_value (BoltQueryParser *parser, GValue *value)
   return FALSE;
 }
 
-static gboolean
+static Expr * parse_term (BoltQueryParser *parser);
+static Expr * parse_expression (BoltQueryParser *parser);
+
+static Expr *
 parse_condition (BoltQueryParser *parser)
 {
-  GValue val = G_VALUE_INIT;
+  struct Condition *c = condition_new ();
   gboolean ok;
-  char *prop;
 
   g_debug ("condition");
 
   ok = parser_expect (parser, G_TOKEN_IDENTIFIER);
   if (!ok)
-    return FALSE;
+    return NULL;
 
-  prop = g_strdup (parser->scanner->value.v_identifier);
+  c->field = g_strdup (parser->scanner->value.v_identifier);
 
   ok = parser_expect (parser, ':');
 
   if (!ok)
-    return FALSE;
+    return NULL;
 
-  ok = parse_value (parser, &val);
+  ok = parse_value (parser, &c->val);
 
   if (!ok)
-    return FALSE;
+    return NULL;
 
-  g_print ("Parsed condition: %s:%s\n", prop, g_value_get_string (&val));
-
-  return TRUE;
+  return (Expr *) c;
 }
 
-static gboolean parse_term (BoltQueryParser *parser);
-
-static gboolean
+static Expr *
 parse_not (BoltQueryParser *parser)
 {
+  struct Unary *op;
+  Expr *exp = NULL;
   gboolean ok;
 
   ok = parser_expect (parser, '-');
   if (!ok)
-    return FALSE;
+    return NULL;
 
   g_debug ("not");
-  return parse_term (parser);
+
+  exp = parse_term (parser);
+  if (!exp)
+    return NULL;
+
+  op = unary_new ('-');
+  op->rhs = g_steal_pointer (&exp);
+
+  return (Expr *) op;
 }
 
-static gboolean parse_expression (BoltQueryParser *parser);
-
-static gboolean
+static Expr *
 parse_group (BoltQueryParser *parser)
 {
+  Expr *exp;
   gboolean ok;
 
   ok = parser_expect (parser, '(');
@@ -358,21 +551,21 @@ parse_group (BoltQueryParser *parser)
     return FALSE;
 
   g_debug ("group");
-  ok = parse_expression (parser);
+  exp = parse_expression (parser);
   g_debug ("group exp done: %d", (int) ok);
 
-  if (!ok)
-    return FALSE;
+  if (!exp)
+    return NULL;
 
   ok = parser_expect (parser, ')');
   if (!ok)
     return FALSE;
 
   g_debug ("group done");
-  return TRUE;
+  return exp;
 }
 
-static gboolean
+static Expr *
 parse_term (BoltQueryParser *parser)
 {
   g_debug ("term");
@@ -384,67 +577,100 @@ parse_term (BoltQueryParser *parser)
   else
     return parse_condition (parser);
 
-  return TRUE;
+  return NULL;
 }
 
-static gboolean
+static Expr *
 parse_or (BoltQueryParser *parser)
 {
   gboolean ok;
 
   ok = parser_expect (parser, '|');
   if (!ok)
-    return FALSE;
+    return NULL;
 
   g_debug ("operator OR");
 
-  return ok;
+  return (Expr *) binary_new ('|');;
 }
 
-static gboolean
+static Expr *
 parse_and (BoltQueryParser *parser)
 {
   parser_accept (parser, '&');
 
   g_debug ("operator AND");
 
-  return TRUE;
+  return (Expr *) binary_new ('&');
 }
 
-static gboolean
+static Expr *
 parse_expression (BoltQueryParser *parser)
 {
+  struct Binary *b;
+  Expr *op = NULL;
+  Expr *lhs = NULL;
+  Expr *rhs = NULL;
   gboolean ok;
 
   g_debug ("expression term");
 
-  ok = parse_term (parser);
-  if (!ok)
-    return FALSE;
+  lhs = parse_term (parser);
+  if (!lhs)
+    return NULL;
 
   ok = parser_skip (parser, ' ');
 
   if (parser_check (parser, '|'))
-    ok = parse_or (parser);
+    op = parse_or (parser);
   else if (parser_check (parser, '&') || ok)
-    ok = parse_and (parser);
+    op = parse_and (parser);
   else
-    return TRUE;
+    return g_steal_pointer (&lhs);
 
-  if (!ok)
-    return FALSE;
+  if (!op)
+    return NULL;
 
   parser_skip (parser, ' ');
 
-  return parse_expression (parser);
+  rhs = parse_expression (parser);
+  if (rhs == NULL)
+    return NULL;
+
+  b = (struct Binary *) op;
+  b->lhs = g_steal_pointer (&lhs);
+  b->rhs = g_steal_pointer (&rhs);
+
+  return (Expr *) op;
+}
+
+static Expr *
+parse_input (BoltQueryParser *parser,
+             const char      *data)
+{
+  gboolean ok;
+  Expr *exp;
+
+  g_scanner_input_text (parser->scanner, data, strlen (data));
+  g_scanner_set_scope (parser->scanner, QL_SCOPE_DEFAULT);
+
+  exp = parse_expression (parser);
+  if (!exp)
+    return exp;
+
+  ok = parser_expect (parser, G_TOKEN_EOF);
+  if (!ok)
+    return NULL;
+
+  return g_steal_pointer (&exp);
 }
 
 int
 main (int argc, char **argv)
 {
   BoltQueryParser parser = {0, };
+  Expr *exp;
   GScanner *scanner;
-  gboolean ok;
   BtId *id;
 
   if (argc != 2)
@@ -454,17 +680,17 @@ main (int argc, char **argv)
 
   id = g_object_new (BT_TYPE_ID, NULL);
 
-  g_scanner_input_text (scanner, argv[1], strlen (argv[1]));
-  g_scanner_set_scope (scanner, QL_SCOPE_DEFAULT);
-
   parser.scanner = scanner;
-  ok = parse_expression (&parser);
+  exp = parse_input (&parser, argv[1]);
 
-  if (ok)
-    ok = parser_expect (&parser, G_TOKEN_EOF);
+  if (!exp)
+    {
+     g_printerr ("ERROR: %s\n", parser.error->message);
+     return -1;
+    }
 
-  if (!ok)
-    g_printerr ("ERROR: %s\n", parser.error->message);
+  expression_dump (exp, stdout);
+  g_fprintf (stdout, "\n");
 
   return 0;
 }
