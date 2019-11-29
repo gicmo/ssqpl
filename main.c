@@ -443,18 +443,15 @@ parser_check (BoltQueryParser *parser, int token)
 static gboolean
 parser_skip (BoltQueryParser *parser, int token)
 {
-  GTokenType next;
+  gboolean ok;
   int count = 0;
 
-  while ((int) (next = parser_peek (parser)) == token)
+  while (parser_check (parser, token))
     {
-      next = parser_next (parser);
+      ok = parser_expect (parser, token);
 
-      if ((int) next != token)
-        {
-          g_warning ("internal parser error");
-          break;
-        }
+      if (!ok)
+        return FALSE;
 
       count++;
     }
