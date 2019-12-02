@@ -72,42 +72,33 @@ bt_id_class_init (BtIdClass *klass)
 
 
 static GScannerConfig parser_config =
-{
-  ("\t\r\n"),		/* cset_skip_characters */
-  (
-  G_CSET_a_2_z
-  G_CSET_A_2_Z
-  ),			/* cset_identifier_first */
-  (
-  G_CSET_a_2_z
-  G_CSET_A_2_Z
-  G_CSET_DIGITS
-  "-"
-  ),			/* cset_identifier_nth */
-  ("#\n"),		/* cpair_comment_single */
-  TRUE,		/* case_sensitive */
-  TRUE,		/* skip_comment_multi */
-  TRUE,			/* skip_comment_single */
-  FALSE,		/* scan_comment_multi */
-  TRUE,			/* scan_identifier */
-  FALSE,		/* scan_identifier_1char */
-  FALSE,		/* scan_identifier_NULL */
-  TRUE,			/* scan_symbols */
-  FALSE,		/* scan_binary */
-  FALSE,		/* scan_octal */
-  TRUE,			/* scan_float */
-  FALSE,		/* scan_hex */
-  FALSE,		/* scan_hex_dollar */
-  TRUE,		/* scan_string_sq */
-  TRUE,		/* scan_string_dq */
-  TRUE,		/* numbers_2_int */
-  FALSE,			/* int_2_float */
-  FALSE,		/* identifier_2_string */
-  TRUE,		/* char_2_token */
-  TRUE,			/* symbol_2_token */
-  FALSE,		/* scope_0_fallback */
-  TRUE,
-};
+  {
+   .cset_skip_characters = ("\t\r\n"),
+   .cset_identifier_first = (G_CSET_a_2_z G_CSET_A_2_Z),
+   .cset_identifier_nth = (G_CSET_a_2_z G_CSET_A_2_Z G_CSET_DIGITS "-"),
+   .cpair_comment_single = ("#\n"),
+   .case_sensitive = TRUE,
+   .skip_comment_multi = TRUE,
+   .skip_comment_single = TRUE,
+   .scan_comment_multi = FALSE,
+   .scan_identifier = TRUE,
+   .scan_identifier_1char = FALSE,
+   .scan_identifier_NULL = FALSE,
+   .scan_symbols = TRUE,
+   .scan_binary = FALSE,
+   .scan_octal = FALSE,
+   .scan_float = TRUE,
+   .scan_hex = FALSE,
+   .scan_hex_dollar = FALSE,
+   .scan_string_sq = TRUE,
+   .scan_string_dq = TRUE,
+   .numbers_2_int = TRUE,
+   .int_2_float = FALSE,
+   .identifier_2_string = FALSE,
+   .char_2_token = TRUE,
+   .symbol_2_token = TRUE,
+   .scope_0_fallback = FALSE,
+  };
 
 enum
 {
