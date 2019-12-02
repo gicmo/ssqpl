@@ -6,99 +6,34 @@
 
 #include <string.h>
 
-
-#define BT_TYPE_ID bt_id_get_type ()
-G_DECLARE_FINAL_TYPE (BtId, bt_id, BT, ID, GObject)
-
-struct _BtId
-{
-  GObject parent;
-};
-
-G_DEFINE_TYPE (BtId, bt_id, G_TYPE_OBJECT)
-
-enum {
-  PROP_ID_0,
-  PROP_ID,
-  PROP_ID_LAST
-};
-
-
-static GParamSpec *id_props[PROP_ID_LAST] = {NULL, };
-
-
-static void
-bt_id_init (BtId *be)
-{
-}
-
-static void
-bt_id_get_property (GObject    *object,
-                    guint       prop_id,
-                    GValue     *value,
-                    GParamSpec *pspec)
-{
-  switch (prop_id)
-    {
-    case PROP_ID:
-      g_value_set_string (value, "bolt-id");
-      break;
-
-    default:
-      G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
-    }
-}
-
-static void
-bt_id_class_init (BtIdClass *klass)
-{
-  GObjectClass *gobject_class = G_OBJECT_CLASS (klass);
-
-  gobject_class->get_property = bt_id_get_property;
-
-  id_props[PROP_ID] =
-    g_param_spec_string ("id", "Id", NULL,
-                         NULL,
-                         G_PARAM_READABLE |
-                         G_PARAM_STATIC_NICK |
-                         G_PARAM_STATIC_BLURB);
-
-  g_object_class_install_properties (gobject_class,
-                                     PROP_ID_LAST,
-                                     id_props);
-
-
-}
-
-
 static GScannerConfig parser_config =
-  {
-   .cset_skip_characters = ("\t\r\n"),
-   .cset_identifier_first = (G_CSET_a_2_z G_CSET_A_2_Z),
-   .cset_identifier_nth = (G_CSET_a_2_z G_CSET_A_2_Z G_CSET_DIGITS "-"),
-   .cpair_comment_single = ("#\n"),
-   .case_sensitive = TRUE,
-   .skip_comment_multi = TRUE,
-   .skip_comment_single = TRUE,
-   .scan_comment_multi = FALSE,
-   .scan_identifier = TRUE,
-   .scan_identifier_1char = FALSE,
-   .scan_identifier_NULL = FALSE,
-   .scan_symbols = TRUE,
-   .scan_binary = FALSE,
-   .scan_octal = FALSE,
-   .scan_float = TRUE,
-   .scan_hex = FALSE,
-   .scan_hex_dollar = FALSE,
-   .scan_string_sq = TRUE,
-   .scan_string_dq = TRUE,
-   .numbers_2_int = TRUE,
-   .int_2_float = FALSE,
-   .identifier_2_string = FALSE,
-   .char_2_token = TRUE,
-   .symbol_2_token = TRUE,
-   .scope_0_fallback = FALSE,
-  };
+{
+ .cset_skip_characters = ("\t\r\n"),
+ .cset_identifier_first = (G_CSET_a_2_z G_CSET_A_2_Z),
+ .cset_identifier_nth = (G_CSET_a_2_z G_CSET_A_2_Z G_CSET_DIGITS "-"),
+ .cpair_comment_single = ("#\n"),
+ .case_sensitive = TRUE,
+ .skip_comment_multi = TRUE,
+ .skip_comment_single = TRUE,
+ .scan_comment_multi = FALSE,
+ .scan_identifier = TRUE,
+ .scan_identifier_1char = FALSE,
+ .scan_identifier_NULL = FALSE,
+ .scan_symbols = TRUE,
+ .scan_binary = FALSE,
+ .scan_octal = FALSE,
+ .scan_float = TRUE,
+ .scan_hex = FALSE,
+ .scan_hex_dollar = FALSE,
+ .scan_string_sq = TRUE,
+ .scan_string_dq = TRUE,
+ .numbers_2_int = TRUE,
+ .int_2_float = FALSE,
+ .identifier_2_string = FALSE,
+ .char_2_token = TRUE,
+ .symbol_2_token = TRUE,
+ .scope_0_fallback = FALSE,
+};
 
 enum
 {
@@ -111,6 +46,84 @@ enum
   QL_SCOPE_DEFAULT = 0,
 };
 
+#define BOLT_TYPE_QUERY_PARSER bolt_query_parser_get_type ()
+G_DECLARE_FINAL_TYPE (BoltQueryParser, bolt_query_parser, BOLT, QUERY_PARSER, GObject)
+
+struct _BoltQueryParser
+{
+  GObject parent;
+
+  GScanner *scanner;
+  GError   *error;
+};
+
+enum {
+  PROP_PARSER_0,
+  PROP_PARSER_ERROR,
+  PROP_PARSER_LAST
+};
+
+static GParamSpec *parser_props[PROP_PARSER_LAST] = {NULL, };
+
+G_DEFINE_TYPE (BoltQueryParser, bolt_query_parser, G_TYPE_OBJECT)
+
+static void
+bolt_device_finalize (GObject *object)
+{
+  BoltQueryParser *parser = BOLT_QUERY_PARSER (object);
+
+  g_clear_pointer (&parser->scanner, g_scanner_destroy);
+  g_clear_error (&parser->error);
+
+  G_OBJECT_CLASS (bolt_query_parser_parent_class)->finalize (object);
+}
+
+static void
+bolt_query_parser_init (BoltQueryParser *parser)
+{
+  parser->scanner = g_scanner_new (&parser_config);
+}
+
+static void
+bolt_query_parser_get_property (GObject    *object,
+                                guint       prop_id,
+                                GValue     *value,
+                                GParamSpec *pspec)
+{
+  BoltQueryParser *parser = BOLT_QUERY_PARSER (object);
+
+  switch (prop_id)
+    {
+    case PROP_PARSER_ERROR:
+      g_value_set_boxed(value, parser->error);
+      break;
+
+    default:
+      G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+    }
+}
+
+static void
+bolt_query_parser_class_init (BoltQueryParserClass *klass)
+{
+  GObjectClass *gobject_class = G_OBJECT_CLASS (klass);
+
+  gobject_class->finalize = bolt_device_finalize;
+  gobject_class->get_property = bolt_query_parser_get_property;
+
+  parser_props[PROP_PARSER_ERROR] =
+    g_param_spec_boxed ("error", "Error", NULL,
+                        G_TYPE_ERROR,
+                        G_PARAM_READABLE |
+                        G_PARAM_STATIC_NICK |
+                        G_PARAM_STATIC_BLURB);
+
+  g_object_class_install_properties (gobject_class,
+                                     PROP_PARSER_LAST,
+                                     parser_props);
+
+
+}
 
 /* AST */
 
@@ -311,13 +324,6 @@ binary_new (int op)
  * F -> STRING
  * V -> STRING | NUMBER | BOOLEAN
 */
-
-typedef struct BoltQueryParser {
-
-  GScanner *scanner;
-  GError *error;
-
-} BoltQueryParser;
 
 static inline GTokenType
 parser_next (BoltQueryParser *parser)
@@ -639,13 +645,25 @@ parse_expression (BoltQueryParser *parser)
 }
 
 static Expr *
-parse_input (BoltQueryParser *parser,
-             const char      *data)
+bolt_query_parser_parse_string (BoltQueryParser *parser,
+                                const char      *data,
+                                gssize           length,
+                                GError         **error)
 {
   g_autoptr(Expr) exp = NULL;
   gboolean ok;
 
-  g_scanner_input_text (parser->scanner, data, strlen (data));
+  if (length < 0)
+    length = (gssize) strlen (data);
+
+  if (length > G_MAXINT16)
+    {
+      g_set_error (error, G_MARKUP_ERROR, G_MARKUP_ERROR_INVALID_CONTENT,
+                   "input too big: %" G_GSSIZE_FORMAT, length);
+      return NULL;
+    }
+
+  g_scanner_input_text (parser->scanner, data, (guint) length);
   g_scanner_set_scope (parser->scanner, QL_SCOPE_DEFAULT);
 
   exp = parse_expression (parser);
@@ -654,7 +672,10 @@ parse_input (BoltQueryParser *parser,
 
   ok = parser_expect (parser, G_TOKEN_EOF);
   if (!ok)
-    return NULL;
+    {
+      *error = g_error_copy (parser->error);
+      return NULL;
+    }
 
   return g_steal_pointer (&exp);
 }
@@ -662,24 +683,20 @@ parse_input (BoltQueryParser *parser,
 int
 main (int argc, char **argv)
 {
-  BoltQueryParser parser = {0, };
+  g_autoptr(BoltQueryParser) parser = NULL;
+  g_autoptr(GError) error = NULL;
   g_autoptr(Expr) exp = NULL;
-  GScanner *scanner;
-  BtId *id;
 
   if (argc != 2)
     return -1;
 
-  scanner = g_scanner_new (&parser_config);
+  parser = g_object_new (BOLT_TYPE_QUERY_PARSER, NULL);
 
-  id = g_object_new (BT_TYPE_ID, NULL);
-
-  parser.scanner = scanner;
-  exp = parse_input (&parser, argv[1]);
+  exp = bolt_query_parser_parse_string (parser, argv[1], -1, &error);
 
   if (!exp)
     {
-     g_printerr ("ERROR: %s\n", parser.error->message);
+     g_printerr ("ERROR: %s\n", error->message);
      return -1;
     }
 
