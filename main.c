@@ -191,7 +191,7 @@ condition_free (Expr *exp)
   g_free (c->field);
   g_value_unset (&c->val);
 
-  g_slice_free (struct Condition, exp);
+  g_slice_free (Condition, c);
 }
 
 static ExprClass ConditionClass =
