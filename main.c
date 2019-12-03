@@ -134,12 +134,12 @@ typedef struct Condition Condition;
 typedef struct Unary Unary;
 typedef struct Binary Binary;
 
-typedef void (*ExprDump) (Expr *expr, FILE *out);
+typedef void (*ExprStringify) (Expr *expr, GString *out);
 typedef void (*ExprFree) (Expr *expr);
 
 struct ExprClass {
-  ExprDump dump;
-  ExprFree free;
+  ExprStringify stringify;
+  ExprFree      free;
 };
 
 struct Expr {
@@ -170,9 +170,9 @@ struct Binary {
 
 /*  */
 static inline void
-expression_dump (Expr *exp, FILE *out)
+expression_stringify (Expr *exp, GString *out)
 {
-  exp->klass->dump (exp, out);
+  exp->klass->stringify (exp, out);
 }
 
 static inline void
@@ -185,7 +185,7 @@ G_DEFINE_AUTOPTR_CLEANUP_FUNC(Expr, expression_free)
 
 /*  */
 static void
-condition_dump (Expr *exp, FILE *out)
+condition_stringify (Expr *exp, GString *out)
 {
   g_autofree char *tmp = NULL;
   struct Condition *c;
@@ -193,7 +193,7 @@ condition_dump (Expr *exp, FILE *out)
   c = (struct Condition *) exp;
 
   tmp = g_strdup_value_contents (&c->val);
-  g_fprintf (out, "%s:%s", c->field, tmp);
+  g_string_append_printf (out, "%s:%s", c->field, tmp);
 }
 
 static void
@@ -209,7 +209,7 @@ condition_free (Expr *exp)
 
 static ExprClass ConditionClass =
 {
- .dump = condition_dump,
+ .stringify = condition_stringify,
  .free = condition_free,
 };
 
@@ -235,13 +235,13 @@ G_DEFINE_AUTOPTR_CLEANUP_FUNC(Condition, condition_cleanup)
 
 /*  */
 static void
-unary_dump (Expr *exp, FILE *out)
+unary_stringify (Expr *exp, GString *out)
 {
   struct Unary *u = (struct Unary *) exp;
 
-  g_fprintf (out, "%c(", u->op);
-  expression_dump (u->rhs, out);
-  g_fprintf (out, ")");
+  g_string_append_printf (out, "%c(", u->op);
+  expression_stringify (u->rhs, out);
+  g_string_append_printf (out, ")");
 }
 
 static void
@@ -257,7 +257,7 @@ unary_free (Expr *exp)
 
 static ExprClass UnaryClass =
 {
- .dump = unary_dump,
+ .stringify = unary_stringify,
  .free = unary_free,
 };
 
@@ -275,15 +275,15 @@ unary_new (int op)
 
 /* */
 static void
-binary_dump (Expr *exp, FILE *out)
+binary_stringify (Expr *exp, GString *out)
 {
   Binary *b = (Binary *) exp;
 
-  g_fprintf (out, "(");
-  expression_dump (b->lhs, out);
-  g_fprintf (out, "%c", b->op);
-  expression_dump (b->rhs, out);
-  g_fprintf (out, ")");
+  g_string_append_printf (out, "(");
+  expression_stringify (b->lhs, out);
+  g_string_append_printf (out, "%c", b->op);
+  expression_stringify (b->rhs, out);
+  g_string_append_printf (out, ")");
 }
 
 static void
@@ -298,7 +298,7 @@ binary_free (Expr *exp)
 
 static ExprClass BinaryClass =
 {
- .dump = binary_dump,
+ .stringify = binary_stringify,
  .free = binary_free,
 };
 
@@ -685,6 +685,7 @@ main (int argc, char **argv)
 {
   g_autoptr(BoltQueryParser) parser = NULL;
   g_autoptr(GError) error = NULL;
+  g_autoptr(GString) str = NULL;
   g_autoptr(Expr) exp = NULL;
 
   if (argc != 2)
@@ -700,8 +701,9 @@ main (int argc, char **argv)
      return -1;
     }
 
-  expression_dump (exp, stdout);
-  g_fprintf (stdout, "\n");
+  str = g_string_new ("");
+  expression_stringify (exp, str);
+  g_fprintf (stdout, "%s\n", str->str);
 
   return 0;
 }
