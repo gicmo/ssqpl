@@ -47,6 +47,7 @@ enum
 };
 
 #define BOLT_TYPE_QUERY_PARSER bolt_query_parser_get_type ()
+
 G_DECLARE_FINAL_TYPE (BoltQueryParser, bolt_query_parser, BOLT, QUERY_PARSER, GObject)
 
 struct _BoltQueryParser
@@ -55,6 +56,8 @@ struct _BoltQueryParser
 
   GScanner *scanner;
   GError   *error;
+
+  GHashTable *props;
 };
 
 enum {
@@ -82,6 +85,9 @@ static void
 bolt_query_parser_init (BoltQueryParser *parser)
 {
   parser->scanner = g_scanner_new (&parser_config);
+  parser->props = g_hash_table_new_full (g_str_hash, g_str_equal,
+                                         (GDestroyNotify) g_free,
+                                         (GDestroyNotify) g_param_spec_unref);
 }
 
 static void
@@ -134,11 +140,13 @@ typedef struct Condition Condition;
 typedef struct Unary Unary;
 typedef struct Binary Binary;
 
-typedef void (*ExprStringify) (Expr *expr, GString *out);
-typedef void (*ExprFree) (Expr *expr);
+typedef void     (*ExprStringify) (Expr *expr, GString *out);
+typedef gboolean (*ExprEval)      (Expr *expr, GObject *obj);
+typedef void     (*ExprFree)      (Expr *expr);
 
 struct ExprClass {
   ExprStringify stringify;
+  ExprEval      eval;
   ExprFree      free;
 };
 
@@ -149,8 +157,8 @@ struct Expr {
 struct Condition {
   Expr expr;
 
-  char *field;
-  GValue val;
+  GParamSpec *field;
+  GValue      val;
 };
 
 struct Unary {
@@ -175,6 +183,12 @@ expression_stringify (Expr *exp, GString *out)
   exp->klass->stringify (exp, out);
 }
 
+static inline gboolean
+expression_eval (Expr *exp, GObject *obj)
+{
+  return exp->klass->eval (exp, obj);
+}
+
 static inline void
 expression_free (Expr *exp)
 {
@@ -196,7 +210,21 @@ condition_stringify (Expr *exp, GString *out)
   c = (struct Condition *) exp;
 
   tmp = g_strdup_value_contents (&c->val);
-  g_string_append_printf (out, "%s:%s", c->field, tmp);
+  g_string_append_printf (out, "%s:%s", c->field->name, tmp);
+}
+
+static gboolean
+condition_eval (Expr *exp, GObject *obj)
+{
+  struct Condition *c = (struct Condition *) exp;
+  g_auto(GValue) val = G_VALUE_INIT;
+  int r;
+
+  g_object_get_property (obj, c->field->name, &val);
+
+  r = g_param_values_cmp (c->field, &c->val, &val);
+
+  return r == 0;
 }
 
 static void
@@ -204,7 +232,9 @@ condition_free (Expr *exp)
 {
   struct Condition *c = (struct Condition *) exp;
 
-  g_free (c->field);
+  if (c->field)
+    g_param_spec_unref (c->field);
+
   g_value_unset (&c->val);
 
   g_slice_free (Condition, c);
@@ -213,6 +243,7 @@ condition_free (Expr *exp)
 static ExprClass ConditionClass =
 {
  .stringify = condition_stringify,
+ .eval = condition_eval,
  .free = condition_free,
 };
 
@@ -233,7 +264,6 @@ condition_cleanup (Condition *c)
   condition_free ((Expr *) c);
 }
 
-
 G_DEFINE_AUTOPTR_CLEANUP_FUNC(Condition, condition_cleanup)
 
 /*  */
@@ -245,6 +275,14 @@ unary_stringify (Expr *exp, GString *out)
   g_string_append_printf (out, "%c(", u->op);
   expression_stringify (u->rhs, out);
   g_string_append_printf (out, ")");
+}
+
+static gboolean
+unary_eval (Expr *exp, GObject *obj)
+{
+  Unary *u = (Unary *) exp;
+
+  return !expression_eval (u->rhs, obj);
 }
 
 static void
@@ -261,6 +299,7 @@ unary_free (Expr *exp)
 static ExprClass UnaryClass =
 {
  .stringify = unary_stringify,
+ .eval = unary_eval,
  .free = unary_free,
 };
 
@@ -289,6 +328,25 @@ binary_stringify (Expr *exp, GString *out)
   g_string_append_printf (out, ")");
 }
 
+static gboolean
+binary_eval (Expr *exp, GObject *obj)
+{
+  Binary *b = (Binary *) exp;
+  gboolean lhs;
+
+  lhs = expression_eval (b->lhs, obj);
+
+  if (b->op == '&' && lhs == FALSE)
+    return FALSE; /* short-circuit: FALSE && rhs */
+  else if (b->op == '|' && lhs == TRUE)
+    return TRUE; /* short-circuit: TRUE || rhs */
+
+  /* either 'TRUE && rhs' or 'FALSE || rhs'
+   * -> result is just eval(rhs) */
+
+  return expression_eval (b->rhs, obj);
+}
+
 static void
 binary_free (Expr *exp)
 {
@@ -302,6 +360,7 @@ binary_free (Expr *exp)
 static ExprClass BinaryClass =
 {
  .stringify = binary_stringify,
+ .eval = binary_eval,
  .free = binary_free,
 };
 
@@ -454,6 +513,73 @@ parser_skip (BoltQueryParser *parser, int token)
 }
 
 /* production rules */
+
+static gboolean
+parse_value_int (BoltQueryParser *parser,
+                 GValue          *dest,
+                 gint64           v)
+{
+  GType type = G_VALUE_TYPE (dest);
+
+  /* TODO: validate */
+
+  switch (type)
+    {
+    case G_TYPE_CHAR:
+      g_value_set_schar (dest, (gint8) v);
+      break;
+
+    case G_TYPE_UCHAR:
+      g_value_set_uchar (dest, (guchar) v);
+      break;
+
+    case G_TYPE_INT:
+      g_value_set_int (dest, (int) v);
+      break;
+
+    case G_TYPE_UINT:
+      g_value_set_uint (dest, (unsigned int) v);
+      break;
+
+    case G_TYPE_INT64:
+      g_value_set_int64 (dest, v);
+      break;
+
+    case G_TYPE_UINT64:
+      g_value_set_uint64 (dest, (guint64) v);
+      break;
+
+    default:
+      g_set_error (&parser->error,
+                   G_MARKUP_ERROR, G_MARKUP_ERROR_PARSE,
+                   "invalid value type '%s' for field",
+                   g_type_name (type));
+      return FALSE;
+    }
+
+  return TRUE;
+}
+
+static gboolean
+parse_value_str (BoltQueryParser *parser,
+                 GValue          *dest,
+                 const char      *str)
+{
+  GType type = G_VALUE_TYPE (dest);
+
+  if (type != G_TYPE_STRING)
+    {
+      g_set_error (&parser->error,
+                   G_MARKUP_ERROR, G_MARKUP_ERROR_PARSE,
+                   "invalid value type '%s' for field",
+                   g_type_name (type));
+      return FALSE;
+    }
+
+  g_value_set_string (dest, str);
+  return TRUE;
+}
+
 static gboolean
 parse_value (BoltQueryParser *parser, GValue *val)
 {
@@ -466,19 +592,13 @@ parse_value (BoltQueryParser *parser, GValue *val)
   switch (token)
     {
     case G_TOKEN_INT:
-      g_value_init (val, G_TYPE_INT64);
-      g_value_set_int64 (val, value->v_int64);
-      return TRUE;
+      return parse_value_int (parser, val, value->v_int64);
 
     case G_TOKEN_STRING:
-      g_value_init (val, G_TYPE_STRING);
-      g_value_set_string (val, value->v_string);
-      return TRUE;
+      return parse_value_str (parser, val, value->v_string);
 
     case G_TOKEN_IDENTIFIER:
-      g_value_init (val, G_TYPE_STRING);
-      g_value_set_string (val, value->v_identifier);
-      return TRUE;
+      return parse_value_str (parser, val, value->v_identifier);
 
     default:
       g_set_error (&parser->error,
@@ -497,6 +617,8 @@ static Expr *
 parse_condition (BoltQueryParser *parser)
 {
   g_autoptr(Condition) c = condition_new ();
+  const char *name;
+  GParamSpec *spec;
   gboolean ok;
 
   g_debug ("condition");
@@ -505,17 +627,52 @@ parse_condition (BoltQueryParser *parser)
   if (!ok)
     return NULL;
 
-  c->field = g_strdup (parser_value (parser)->v_identifier);
+  name = parser_value (parser)->v_identifier;
+
+  if (name == NULL)
+    {
+      g_set_error (&parser->error,
+                   G_MARKUP_ERROR, G_MARKUP_ERROR_PARSE,
+                   "empty identifier");
+      return NULL;
+    }
+
+  spec = g_hash_table_lookup (parser->props, name);
+  if (spec == NULL)
+    {
+      g_set_error (&parser->error,
+                   G_MARKUP_ERROR, G_MARKUP_ERROR_PARSE,
+                   "unknown field: '%s'", name);
+      return NULL;
+    }
+
+  c->field = g_param_spec_ref (spec);
 
   ok = parser_expect (parser, ':');
 
   if (!ok)
     return NULL;
 
+  g_value_init (&c->val, c->field->value_type);
+
   ok = parse_value (parser, &c->val);
 
   if (!ok)
     return NULL;
+
+  /*  */
+
+  if (!g_value_type_compatible (c->field->value_type,
+                                G_VALUE_TYPE (&c->val)))
+    {
+      g_set_error (&parser->error,
+                   G_MARKUP_ERROR, G_MARKUP_ERROR_PARSE,
+                   "value '%s' incompatible with field: '%s' (%s)",
+                   g_type_name (G_VALUE_TYPE (&c->val)),
+                   c->field->name,
+                   g_type_name (c->field->value_type));
+      return NULL;
+    }
 
   return (Expr *) g_steal_pointer (&c);
 }
@@ -580,6 +737,7 @@ parse_term (BoltQueryParser *parser)
   else
     return parse_condition (parser);
 
+  g_assert_not_reached ();
   return NULL;
 }
 
@@ -671,7 +829,10 @@ bolt_query_parser_parse_string (BoltQueryParser *parser,
 
   exp = parse_expression (parser);
   if (!exp)
-    return exp;
+    {
+      *error = g_error_copy (parser->error);
+      return exp;
+    }
 
   ok = parser_expect (parser, G_TOKEN_EOF);
   if (!ok)
@@ -683,6 +844,104 @@ bolt_query_parser_parse_string (BoltQueryParser *parser,
   return g_steal_pointer (&exp);
 }
 
+static void
+bolt_query_parser_register_object_props (BoltQueryParser *parser,
+                                         GObjectClass    *klass)
+{
+  g_autofree GParamSpec **props = NULL;
+  guint n;
+
+  props = g_object_class_list_properties (klass, &n);
+
+  for (guint i = 0; i < n; i++)
+    {
+      GParamSpec *spec = props[i];
+      g_hash_table_insert (parser->props,
+                           g_strdup (spec->name),
+                           g_param_spec_ref (spec));
+      g_debug ("registered '%s'", spec->name);
+    }
+}
+
+/* *** Tiny test object with  */
+#define BT_TYPE_ID bt_id_get_type ()
+G_DECLARE_FINAL_TYPE (BtId, bt_id, BT, ID, GObject)
+
+struct _BtId
+{
+  GObject parent;
+};
+
+G_DEFINE_TYPE (BtId, bt_id, G_TYPE_OBJECT)
+
+enum {
+  PROP_ID_0,
+  PROP_ID,
+  PROP_INT,
+  PROP_ID_LAST
+};
+
+
+static GParamSpec *id_props[PROP_ID_LAST] = {NULL, };
+
+
+static void
+bt_id_init (BtId *be G_GNUC_UNUSED)
+{
+}
+
+static void
+bt_id_get_property (GObject    *object,
+                    guint       prop_id,
+                    GValue     *value,
+                    GParamSpec *pspec)
+{
+  switch (prop_id)
+    {
+    case PROP_ID:
+      g_value_set_string (value, "bolt-id");
+      break;
+
+    case PROP_INT:
+      g_value_set_int (value, 42);
+      break;
+
+    default:
+      G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+    }
+}
+
+static void
+bt_id_class_init (BtIdClass *klass)
+{
+  GObjectClass *gobject_class = G_OBJECT_CLASS (klass);
+
+  gobject_class->get_property = bt_id_get_property;
+
+  id_props[PROP_ID] =
+    g_param_spec_string ("id", "Id", NULL,
+                         NULL,
+                         G_PARAM_READABLE |
+                         G_PARAM_STATIC_NICK |
+                         G_PARAM_STATIC_BLURB);
+
+  id_props[PROP_INT] =
+    g_param_spec_int("int", "Int",
+                     NULL,
+                     -42, 256, 0,
+                     G_PARAM_READABLE |
+                     G_PARAM_STATIC_NICK |
+                     G_PARAM_STATIC_BLURB);
+
+  g_object_class_install_properties (gobject_class,
+                                     PROP_ID_LAST,
+                                     id_props);
+
+
+}
+
+/* */
+
 int
 main (int argc, char **argv)
 {
@@ -690,11 +949,17 @@ main (int argc, char **argv)
   g_autoptr(GError) error = NULL;
   g_autoptr(GString) str = NULL;
   g_autoptr(Expr) exp = NULL;
+  g_autoptr(BtId) id = NULL;
+  gboolean res;
 
   if (argc != 2)
     return -1;
 
+  id = g_object_new (BT_TYPE_ID, NULL);
+
   parser = g_object_new (BOLT_TYPE_QUERY_PARSER, NULL);
+
+  bolt_query_parser_register_object_props (parser, G_OBJECT_GET_CLASS (id));
 
   exp = bolt_query_parser_parse_string (parser, argv[1], -1, &error);
 
@@ -706,7 +971,9 @@ main (int argc, char **argv)
 
   str = g_string_new ("");
   expression_stringify (exp, str);
-  g_fprintf (stdout, "%s\n", str->str);
+  g_fprintf (stdout, "%s", str->str);
+  res = expression_eval (exp, G_OBJECT (id));
+  g_fprintf (stdout, " = %s\n", (res ? "true" : "false"));
 
   return 0;
 }
