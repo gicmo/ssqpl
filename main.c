@@ -3,8 +3,101 @@
 #include <glib.h>
 #include <glib-object.h>
 #include <glib/gprintf.h>
+#include <gio/gio.h>
 
 #include <string.h>
+
+#include "test-enums.h"
+
+/*  */
+gboolean
+bolt_enum_class_from_string (GEnumClass *klass,
+                             const char *string,
+                             gint       *enum_out,
+                             GError    **error)
+{
+  const char *name;
+  GEnumValue *ev;
+
+  g_return_val_if_fail (G_IS_ENUM_CLASS (klass), FALSE);
+  g_return_val_if_fail (error == NULL || *error == NULL, FALSE);
+
+  if (string == NULL)
+    {
+      name = g_type_name_from_class ((GTypeClass *) klass);
+      g_set_error (error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
+                   "empty string passed for enum class for '%s'",
+                   name);
+      return FALSE;
+    }
+
+  ev = g_enum_get_value_by_nick (klass, string);
+
+  if (ev == NULL)
+    {
+      name = g_type_name_from_class ((GTypeClass *) klass);
+      g_set_error (error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
+                   "invalid string '%s' for enum '%s'", string, name);
+      return FALSE;
+    }
+
+  if (enum_out)
+    *enum_out = ev->value;
+
+  return TRUE;
+}
+
+gboolean
+bolt_flags_class_from_string (GFlagsClass *flags_class,
+                              const char  *string,
+                              guint       *flags_out,
+                              GError     **error)
+{
+  g_auto(GStrv) vals = NULL;
+  const char *name;
+  guint flags = 0;
+
+  g_return_val_if_fail (G_IS_FLAGS_CLASS (flags_class), FALSE);
+  g_return_val_if_fail (error == NULL || *error == NULL, FALSE);
+
+  if (string == NULL)
+    {
+      name = g_type_name_from_class ((GTypeClass *) flags_class);
+      g_set_error (error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
+                   "empty string passed for flags class for '%s'",
+                   name);
+      return FALSE;
+    }
+
+  vals = g_strsplit (string, "|", -1);
+
+  for (guint i = 0; vals[i]; i++)
+    {
+      GFlagsValue *fv;
+      char *nick;
+
+      nick = g_strstrip (vals[i]);
+      fv = g_flags_get_value_by_nick (flags_class, nick);
+
+      if (fv == NULL)
+        {
+          name = g_type_name_from_class ((GTypeClass *) flags_class);
+          g_set_error (error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
+                       "invalid flag '%s' for flags '%s'", string, name);
+
+          return FALSE;
+        }
+
+      flags |= fv->value;
+    }
+
+  if (flags_out != NULL)
+    *flags_out = flags;
+
+  return TRUE;
+}
+
+/*  */
 
 static GScannerConfig parser_config =
 {
@@ -581,6 +674,47 @@ parse_value_str (BoltQueryParser *parser,
 }
 
 static gboolean
+parse_value_enum (BoltQueryParser *parser,
+                  GParamSpec      *spec,
+                  GValue          *dest)
+{
+  GParamSpecEnum *enum_spec = G_PARAM_SPEC_ENUM (spec);
+  GTokenType  token;
+  GTokenValue *value;
+  const char *str;
+  gboolean ok;
+  gint val;
+
+  token = parser_next (parser);
+
+  if (token != G_TOKEN_STRING && token != G_TOKEN_IDENTIFIER)
+    {
+      g_set_error (&parser->error,
+                   G_MARKUP_ERROR, G_MARKUP_ERROR_PARSE,
+                   "malformed input @ %u: unexpected token: %u",
+                   parser->scanner->position, token);
+      return FALSE;
+    }
+
+  value = parser_value (parser);
+
+  if (token == G_TOKEN_STRING)
+    str = value->v_string;
+  else
+    str = value->v_identifier;
+
+  ok = bolt_enum_class_from_string (enum_spec->enum_class,
+                                    str,
+                                    &val,
+                                    &parser->error);
+
+  if (ok)
+    g_value_set_enum (dest, val);
+
+  return ok;
+}
+
+static gboolean
 parse_value (BoltQueryParser *parser, GValue *val)
 {
   GTokenType  token;
@@ -647,20 +781,21 @@ parse_condition (BoltQueryParser *parser)
     }
 
   c->field = g_param_spec_ref (spec);
+  g_value_init (&c->val, c->field->value_type);
 
   ok = parser_expect (parser, ':');
 
   if (!ok)
     return NULL;
 
-  g_value_init (&c->val, c->field->value_type);
-
-  ok = parse_value (parser, &c->val);
+  if (G_IS_PARAM_SPEC_ENUM (c->field))
+    ok = parse_value_enum (parser, c->field, &c->val);
+  else
+    ok = parse_value (parser, &c->val);
+  /*  */
 
   if (!ok)
     return NULL;
-
-  /*  */
 
   if (!g_value_type_compatible (c->field->value_type,
                                 G_VALUE_TYPE (&c->val)))
@@ -878,6 +1013,8 @@ enum {
   PROP_ID_0,
   PROP_ID,
   PROP_INT,
+  PROP_ENUM,
+  PROP_FLAG,
   PROP_ID_LAST
 };
 
@@ -906,6 +1043,14 @@ bt_id_get_property (GObject    *object,
       g_value_set_int (value, 42);
       break;
 
+    case PROP_ENUM:
+      g_value_set_enum (value, BOLT_TEST_TWO);
+      break;
+
+    case PROP_FLAG:
+      g_value_set_flags (value, BOLT_KITT_DEFAULT);
+      break;
+
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
     }
@@ -932,6 +1077,22 @@ bt_id_class_init (BtIdClass *klass)
                      G_PARAM_READABLE |
                      G_PARAM_STATIC_NICK |
                      G_PARAM_STATIC_BLURB);
+
+  id_props[PROP_ENUM] =
+    g_param_spec_enum ("enum", "Enum", NULL,
+                       BOLT_TYPE_TEST_ENUM,
+                       BOLT_TEST_UNKNOWN,
+                       G_PARAM_READABLE |
+                       G_PARAM_STATIC_NICK |
+                       G_PARAM_STATIC_BLURB);
+
+  id_props[PROP_FLAG] =
+    g_param_spec_flags ("flags", "Flags", NULL,
+                        BOLT_TYPE_KITT_FLAGS,
+                        BOLT_KITT_DISABLED,
+                        G_PARAM_READABLE |
+                        G_PARAM_STATIC_NICK |
+                        G_PARAM_STATIC_BLURB);
 
   g_object_class_install_properties (gobject_class,
                                      PROP_ID_LAST,
