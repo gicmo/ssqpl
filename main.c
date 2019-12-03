@@ -178,6 +178,9 @@ expression_stringify (Expr *exp, GString *out)
 static inline void
 expression_free (Expr *exp)
 {
+  if (exp == NULL)
+    return;
+
   exp->klass->free (exp);
 }
 
