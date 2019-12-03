@@ -95,7 +95,7 @@ bolt_query_parser_get_property (GObject    *object,
   switch (prop_id)
     {
     case PROP_PARSER_ERROR:
-      g_value_set_boxed(value, parser->error);
+      g_value_set_boxed (value, parser->error);
       break;
 
     default:
