@@ -10,6 +10,12 @@
 #include "test-enums.h"
 
 /*  */
+
+typedef gint (*BoltParamValueCmp) (GParamSpec   *pspec,
+                                   const GValue *a,
+                                   const GValue *b);
+
+/*  */
 gboolean
 bolt_enum_class_from_string (GEnumClass *klass,
                              const char *string,
@@ -96,6 +102,9 @@ bolt_flags_class_from_string (GFlagsClass *flags_class,
 
   return TRUE;
 }
+
+#define bolt_flag_isset(flags_, flag_)  (!!(flags_ & flag_))
+#define bolt_flag_isclear(flags_, flag_) (!(flags_ & flag_))
 
 /*  */
 
@@ -224,6 +233,23 @@ bolt_query_parser_class_init (BoltQueryParserClass *klass)
 
 }
 
+/* */
+static gint
+flags_cmp (GParamSpec   *pspec G_GNUC_UNUSED,
+           const GValue *have,
+           const GValue *want)
+{
+  guint flags = g_value_get_flags (have);
+  guint f = g_value_get_flags (want);
+
+ if (bolt_flag_isset (flags, f))
+    return 0;
+  else
+    return -1;
+}
+
+/* */
+
 /* AST */
 
 typedef struct Expr Expr;
@@ -250,8 +276,12 @@ struct Expr {
 struct Condition {
   Expr expr;
 
+  /* */
   GParamSpec *field;
   GValue      val;
+
+  /* optional */
+  BoltParamValueCmp cmp;
 };
 
 struct Unary {
@@ -315,7 +345,10 @@ condition_eval (Expr *exp, GObject *obj)
 
   g_object_get_property (obj, c->field->name, &val);
 
-  r = g_param_values_cmp (c->field, &c->val, &val);
+  if (c->cmp)
+    r = c->cmp (c->field, &c->val, &val);
+  else
+    r = g_param_values_cmp (c->field, &c->val, &val);
 
   return r == 0;
 }
@@ -715,6 +748,48 @@ parse_value_enum (BoltQueryParser *parser,
 }
 
 static gboolean
+parse_value_flags (BoltQueryParser *parser,
+                   GParamSpec      *spec,
+                   GValue          *dest)
+{
+  GParamSpecFlags *flags_spec = G_PARAM_SPEC_FLAGS (spec);
+  GTokenType  token;
+  GTokenValue *value;
+  const char *str;
+  gboolean ok;
+  guint val;
+
+  token = parser_next (parser);
+
+  if (token != G_TOKEN_STRING && token != G_TOKEN_IDENTIFIER)
+    {
+      g_set_error (&parser->error,
+                   G_MARKUP_ERROR, G_MARKUP_ERROR_PARSE,
+                   "malformed input @ %u: unexpected token: %u",
+                   parser->scanner->position, token);
+      return FALSE;
+    }
+
+  value = parser_value (parser);
+
+  if (token == G_TOKEN_STRING)
+    str = value->v_string;
+  else
+    str = value->v_identifier;
+
+  ok = bolt_flags_class_from_string (flags_spec->flags_class,
+                                    str,
+                                    &val,
+                                    &parser->error);
+
+  if (ok)
+    g_value_set_flags (dest, val);
+
+  return ok;
+}
+
+
+static gboolean
 parse_value (BoltQueryParser *parser, GValue *val)
 {
   GTokenType  token;
@@ -790,6 +865,11 @@ parse_condition (BoltQueryParser *parser)
 
   if (G_IS_PARAM_SPEC_ENUM (c->field))
     ok = parse_value_enum (parser, c->field, &c->val);
+  else if (G_IS_PARAM_SPEC_FLAGS (c->field))
+    {
+      ok = parse_value_flags (parser, c->field, &c->val);
+      c->cmp = flags_cmp;
+    }
   else
     ok = parse_value (parser, &c->val);
   /*  */
