@@ -106,6 +106,17 @@ bolt_flags_class_from_string (GFlagsClass *flags_class,
 #define bolt_flag_isset(flags_, flag_)  (!!(flags_ & flag_))
 #define bolt_flag_isclear(flags_, flag_) (!(flags_ & flag_))
 
+gboolean
+bolt_param_is_int (GParamSpec *spec)
+{
+  if (G_IS_PARAM_SPEC_CHAR (spec) || G_IS_PARAM_SPEC_UCHAR (spec) ||
+      G_IS_PARAM_SPEC_INT (spec) || G_IS_PARAM_SPEC_UINT (spec) ||
+      G_IS_PARAM_SPEC_INT64 (spec) || G_IS_PARAM_SPEC_UINT64 (spec))
+    return TRUE;
+
+  return FALSE;
+}
+
 /*  */
 
 static GScannerConfig parser_config =
@@ -670,11 +681,27 @@ parser_skip (BoltQueryParser *parser, int token)
 
 static gboolean
 parse_value_int (BoltQueryParser *parser,
-                 GValue          *dest,
-                 gint64           v)
+                 Condition       *cond)
 {
+  GValue *dest = &cond->val;
   GType type = G_VALUE_TYPE (dest);
+  GTokenType  token;
+  GTokenValue *value;
+  gint64 v;
 
+  token = parser_next (parser);
+
+  if (token != G_TOKEN_INT)
+    {
+      g_set_error (&parser->error,
+                   G_MARKUP_ERROR, G_MARKUP_ERROR_PARSE,
+                   "malformed input @ %u: unexpected token: %u",
+                   parser->scanner->position, token);
+      return FALSE;
+    }
+
+  value = parser_value (parser);
+  v = value->v_int64;
   /* TODO: validate */
 
   switch (type)
@@ -716,21 +743,23 @@ parse_value_int (BoltQueryParser *parser,
 
 static gboolean
 parse_value_str (BoltQueryParser *parser,
-                 GValue          *dest,
-                 const char      *str)
+                 Condition       *cond)
 {
-  GType type = G_VALUE_TYPE (dest);
+  const char *str;
 
-  if (type != G_TYPE_STRING)
+  str = parser_next_string (parser);
+
+  if (str == NULL)
     {
       g_set_error (&parser->error,
                    G_MARKUP_ERROR, G_MARKUP_ERROR_PARSE,
-                   "invalid value type '%s' for field",
-                   g_type_name (type));
+                   "malformed input @ %u: unexpected token: %u",
+                   parser->scanner->position, parser_token (parser));
       return FALSE;
     }
 
-  g_value_set_string (dest, str);
+  g_value_set_string (&cond->val, str);
+
   return TRUE;
 }
 
@@ -802,32 +831,14 @@ parse_value_flags (BoltQueryParser *parser,
 }
 
 static gboolean
-parse_value (BoltQueryParser *parser, GValue *val)
+unsupported_value (BoltQueryParser *parser,
+                   Condition       *cond)
 {
-  GTokenType  token;
-  GTokenValue *value;
-
-  token = parser_next (parser);
-  value = parser_value (parser);
-
-  switch (token)
-    {
-    case G_TOKEN_INT:
-      return parse_value_int (parser, val, value->v_int64);
-
-    case G_TOKEN_STRING:
-      return parse_value_str (parser, val, value->v_string);
-
-    case G_TOKEN_IDENTIFIER:
-      return parse_value_str (parser, val, value->v_identifier);
-
-    default:
-      g_set_error (&parser->error,
-                   G_MARKUP_ERROR, G_MARKUP_ERROR_PARSE,
-                   "malformed input @ %u: unexpected token: %u",
-                   parser->scanner->position, token);
-    }
-
+  g_set_error (&parser->error,
+               G_MARKUP_ERROR, G_MARKUP_ERROR_PARSE,
+               "malformed input @ %u: unsupported value: %s",
+               parser->scanner->position,
+               g_type_name (cond->field->value_type));
   return FALSE;
 }
 
@@ -875,12 +886,16 @@ parse_condition (BoltQueryParser *parser)
   if (!ok)
     return NULL;
 
-  if (G_IS_PARAM_SPEC_ENUM (c->field))
+  if (G_IS_PARAM_SPEC_STRING (spec))
+    ok = parse_value_str (parser, c);
+  else if (bolt_param_is_int (spec))
+    ok = parse_value_int (parser, c);
+  else if (G_IS_PARAM_SPEC_ENUM (spec))
     ok = parse_value_enum (parser, c);
-  else if (G_IS_PARAM_SPEC_FLAGS (c->field))
+  else if (G_IS_PARAM_SPEC_FLAGS (spec))
     ok = parse_value_flags (parser, c);
   else
-    ok = parse_value (parser, &c->val);
+    ok = unsupported_value (parser, c);
   /*  */
 
   if (!ok)
