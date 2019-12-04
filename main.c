@@ -1160,12 +1160,12 @@ bt_id_class_init (BtIdClass *klass)
                          G_PARAM_STATIC_BLURB);
 
   id_props[PROP_INT] =
-    g_param_spec_int("int", "Int",
-                     NULL,
-                     -42, 256, 0,
-                     G_PARAM_READABLE |
-                     G_PARAM_STATIC_NICK |
-                     G_PARAM_STATIC_BLURB);
+    g_param_spec_int ("int", "Int",
+                      NULL,
+                      -42, 256, 0,
+                      G_PARAM_READABLE |
+                      G_PARAM_STATIC_NICK |
+                      G_PARAM_STATIC_BLURB);
 
   id_props[PROP_ENUM] =
     g_param_spec_enum ("enum", "Enum", NULL,
