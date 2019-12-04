@@ -708,16 +708,16 @@ parse_value_str (BoltQueryParser *parser,
 
 static gboolean
 parse_value_enum (BoltQueryParser *parser,
-                  GParamSpec      *spec,
-                  GValue          *dest)
+                  Condition       *cond)
 {
-  GParamSpecEnum *enum_spec = G_PARAM_SPEC_ENUM (spec);
+  GParamSpecEnum *enum_spec;
   GTokenType  token;
   GTokenValue *value;
   const char *str;
   gboolean ok;
   gint val;
 
+  enum_spec  = G_PARAM_SPEC_ENUM (cond->field);
   token = parser_next (parser);
 
   if (token != G_TOKEN_STRING && token != G_TOKEN_IDENTIFIER)
@@ -742,22 +742,23 @@ parse_value_enum (BoltQueryParser *parser,
                                     &parser->error);
 
   if (ok)
-    g_value_set_enum (dest, val);
+    g_value_set_enum (&cond->val, val);
 
   return ok;
 }
 
 static gboolean
 parse_value_flags (BoltQueryParser *parser,
-                   GParamSpec      *spec,
-                   GValue          *dest)
+                   Condition       *cond)
 {
-  GParamSpecFlags *flags_spec = G_PARAM_SPEC_FLAGS (spec);
+  GParamSpecFlags *flags_spec;
   GTokenType  token;
   GTokenValue *value;
   const char *str;
   gboolean ok;
   guint val;
+
+  flags_spec = G_PARAM_SPEC_FLAGS (cond->field);
 
   token = parser_next (parser);
 
@@ -783,7 +784,10 @@ parse_value_flags (BoltQueryParser *parser,
                                     &parser->error);
 
   if (ok)
-    g_value_set_flags (dest, val);
+    {
+      g_value_set_flags (&cond->val, val);
+      cond->cmp = flags_cmp;
+    }
 
   return ok;
 }
@@ -864,12 +868,9 @@ parse_condition (BoltQueryParser *parser)
     return NULL;
 
   if (G_IS_PARAM_SPEC_ENUM (c->field))
-    ok = parse_value_enum (parser, c->field, &c->val);
+    ok = parse_value_enum (parser, c);
   else if (G_IS_PARAM_SPEC_FLAGS (c->field))
-    {
-      ok = parse_value_flags (parser, c->field, &c->val);
-      c->cmp = flags_cmp;
-    }
+    ok = parse_value_flags (parser, c);
   else
     ok = parse_value (parser, &c->val);
   /*  */
