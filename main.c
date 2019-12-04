@@ -168,18 +168,8 @@ struct _BoltQueryParser
   GObject parent;
 
   GScanner *scanner;
-  GError   *error;
-
   GHashTable *props;
 };
-
-enum {
-  PROP_PARSER_0,
-  PROP_PARSER_ERROR,
-  PROP_PARSER_LAST
-};
-
-static GParamSpec *parser_props[PROP_PARSER_LAST] = {NULL, };
 
 G_DEFINE_TYPE (BoltQueryParser, bolt_query_parser, G_TYPE_OBJECT)
 
@@ -189,7 +179,6 @@ bolt_device_finalize (GObject *object)
   BoltQueryParser *parser = BOLT_QUERY_PARSER (object);
 
   g_clear_pointer (&parser->scanner, g_scanner_destroy);
-  g_clear_error (&parser->error);
 
   G_OBJECT_CLASS (bolt_query_parser_parent_class)->finalize (object);
 }
@@ -204,44 +193,11 @@ bolt_query_parser_init (BoltQueryParser *parser)
 }
 
 static void
-bolt_query_parser_get_property (GObject    *object,
-                                guint       prop_id,
-                                GValue     *value,
-                                GParamSpec *pspec)
-{
-  BoltQueryParser *parser = BOLT_QUERY_PARSER (object);
-
-  switch (prop_id)
-    {
-    case PROP_PARSER_ERROR:
-      g_value_set_boxed (value, parser->error);
-      break;
-
-    default:
-      G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
-    }
-}
-
-static void
 bolt_query_parser_class_init (BoltQueryParserClass *klass)
 {
   GObjectClass *gobject_class = G_OBJECT_CLASS (klass);
 
   gobject_class->finalize = bolt_device_finalize;
-  gobject_class->get_property = bolt_query_parser_get_property;
-
-  parser_props[PROP_PARSER_ERROR] =
-    g_param_spec_boxed ("error", "Error", NULL,
-                        G_TYPE_ERROR,
-                        G_PARAM_READABLE |
-                        G_PARAM_STATIC_NICK |
-                        G_PARAM_STATIC_BLURB);
-
-  g_object_class_install_properties (gobject_class,
-                                     PROP_PARSER_LAST,
-                                     parser_props);
-
-
 }
 
 /* */
@@ -543,7 +499,8 @@ parser_token (BoltQueryParser *parser)
 }
 
 static const char *
-parser_next_string (BoltQueryParser *parser)
+parser_next_string (BoltQueryParser *parser,
+                    GError         **error)
 {
   GTokenType  token;
   GTokenValue *value;
@@ -552,7 +509,12 @@ parser_next_string (BoltQueryParser *parser)
   token = parser_next (parser);
 
   if (token != G_TOKEN_STRING && token != G_TOKEN_IDENTIFIER)
-    return NULL;
+    {
+      g_set_error (error, G_MARKUP_ERROR, G_MARKUP_ERROR_PARSE,
+                   "malformed input @ %u: unexpected token: %u",
+                   parser->scanner->position, token);
+      return NULL;
+    }
 
   value = parser_value (parser);
 
@@ -568,6 +530,7 @@ parser_next_string (BoltQueryParser *parser)
  * parser_expect:
  * @parser: The parser
  * @token: The expected Token
+ * @error: return location for a %GError, or %NULL
  *
  * Parser will advance and compare the next token to
  * the target @token. If it does not match will put
@@ -576,11 +539,11 @@ parser_next_string (BoltQueryParser *parser)
  * Returns: %TRUE if @token was found.
  **/
 static gboolean
-parser_expect (BoltQueryParser *parser, int token)
+parser_expect (BoltQueryParser *parser, int token, GError **error)
 {
   GTokenType next;
 
-  if (parser->error != NULL)
+  if (error != NULL && *error != NULL)
     return FALSE;
 
   next = g_scanner_get_next_token (parser->scanner);
@@ -588,7 +551,7 @@ parser_expect (BoltQueryParser *parser, int token)
   if ((int) next == token)
     return TRUE;
 
-  g_set_error (&parser->error, G_MARKUP_ERROR, G_MARKUP_ERROR_PARSE,
+  g_set_error (error, G_MARKUP_ERROR, G_MARKUP_ERROR_PARSE,
                "malformed input @ %u: unexpected token: %u",
                parser->scanner->position, token);
 
@@ -609,9 +572,6 @@ static gboolean
 parser_accept (BoltQueryParser *parser, int token)
 {
   GTokenType next;
-
-  if (parser->error != NULL)
-    return FALSE;
 
   next = g_scanner_peek_next_token (parser->scanner);
 
@@ -641,9 +601,6 @@ parser_check (BoltQueryParser *parser, int token)
 {
   GTokenType next;
 
-  if (parser->error != NULL)
-    return FALSE;
-
   next = g_scanner_peek_next_token (parser->scanner);
 
   return (int) next == token;
@@ -666,7 +623,7 @@ parser_skip (BoltQueryParser *parser, int token)
 
   while (parser_check (parser, token))
     {
-      ok = parser_expect (parser, token);
+      ok = parser_expect (parser, token, NULL);
 
       if (!ok)
         return FALSE;
@@ -681,7 +638,8 @@ parser_skip (BoltQueryParser *parser, int token)
 
 static gboolean
 parse_value_int (BoltQueryParser *parser,
-                 Condition       *cond)
+                 Condition       *cond,
+                 GError         **error)
 {
   GValue *dest = &cond->val;
   GType type = G_VALUE_TYPE (dest);
@@ -693,7 +651,7 @@ parse_value_int (BoltQueryParser *parser,
 
   if (token != G_TOKEN_INT)
     {
-      g_set_error (&parser->error,
+      g_set_error (error,
                    G_MARKUP_ERROR, G_MARKUP_ERROR_PARSE,
                    "malformed input @ %u: unexpected token: %u",
                    parser->scanner->position, token);
@@ -731,7 +689,7 @@ parse_value_int (BoltQueryParser *parser,
       break;
 
     default:
-      g_set_error (&parser->error,
+      g_set_error (error,
                    G_MARKUP_ERROR, G_MARKUP_ERROR_PARSE,
                    "invalid value type '%s' for field",
                    g_type_name (type));
@@ -743,11 +701,15 @@ parse_value_int (BoltQueryParser *parser,
 
 static gboolean
 parse_value_str (BoltQueryParser *parser,
-                 Condition       *cond)
+                 Condition       *cond,
+                 GError         **error)
 {
   const char *str;
 
-  str = parser_next_string (parser);
+  str = parser_next_string (parser, error);
+  if (str == NULL)
+    return FALSE;
+
   g_value_set_string (&cond->val, str);
 
   return TRUE;
@@ -755,7 +717,8 @@ parse_value_str (BoltQueryParser *parser,
 
 static gboolean
 parse_value_enum (BoltQueryParser *parser,
-                  Condition       *cond)
+                  Condition       *cond,
+                  GError        **error)
 {
   GParamSpecEnum *enum_spec;
   const char *str;
@@ -763,7 +726,7 @@ parse_value_enum (BoltQueryParser *parser,
   gint val;
 
   enum_spec = G_PARAM_SPEC_ENUM (cond->field);
-  str = parser_next_string (parser);
+  str = parser_next_string (parser, error);
 
   if (str == NULL)
     return FALSE;
@@ -771,7 +734,7 @@ parse_value_enum (BoltQueryParser *parser,
   ok = bolt_enum_class_from_string (enum_spec->enum_class,
                                     str,
                                     &val,
-                                    &parser->error);
+                                    error);
 
   if (ok)
     g_value_set_enum (&cond->val, val);
@@ -781,7 +744,8 @@ parse_value_enum (BoltQueryParser *parser,
 
 static gboolean
 parse_value_flags (BoltQueryParser *parser,
-                   Condition       *cond)
+                   Condition       *cond,
+                   GError         **error)
 {
   GParamSpecFlags *flags_spec;
   const char *str;
@@ -789,7 +753,7 @@ parse_value_flags (BoltQueryParser *parser,
   guint val;
 
   flags_spec = G_PARAM_SPEC_FLAGS (cond->field);
-  str = parser_next_string (parser);
+  str = parser_next_string (parser, error);
 
   if (str == NULL)
     return FALSE;
@@ -797,7 +761,7 @@ parse_value_flags (BoltQueryParser *parser,
   ok = bolt_flags_class_from_string (flags_spec->flags_class,
                                     str,
                                     &val,
-                                    &parser->error);
+                                    error);
 
   if (ok)
     {
@@ -810,9 +774,10 @@ parse_value_flags (BoltQueryParser *parser,
 
 static gboolean
 unsupported_value (BoltQueryParser *parser,
-                   Condition       *cond)
+                   Condition       *cond,
+                   GError         **error)
 {
-  g_set_error (&parser->error,
+  g_set_error (error,
                G_MARKUP_ERROR, G_MARKUP_ERROR_PARSE,
                "malformed input @ %u: unsupported value: %s",
                parser->scanner->position,
@@ -820,11 +785,11 @@ unsupported_value (BoltQueryParser *parser,
   return FALSE;
 }
 
-static Expr * parse_term (BoltQueryParser *parser);
-static Expr * parse_expression (BoltQueryParser *parser);
+static Expr * parse_term (BoltQueryParser *parser, GError **error);
+static Expr * parse_expression (BoltQueryParser *parser, GError **error);
 
 static Expr *
-parse_condition (BoltQueryParser *parser)
+parse_condition (BoltQueryParser *parser, GError **error)
 {
   g_autoptr(Condition) c = condition_new ();
   const char *name;
@@ -833,24 +798,19 @@ parse_condition (BoltQueryParser *parser)
 
   g_debug ("condition");
 
-  ok = parser_expect (parser, G_TOKEN_IDENTIFIER);
+  ok = parser_expect (parser, G_TOKEN_IDENTIFIER, error);
   if (!ok)
     return NULL;
 
   name = parser_value (parser)->v_identifier;
 
   if (name == NULL)
-    {
-      g_set_error (&parser->error,
-                   G_MARKUP_ERROR, G_MARKUP_ERROR_PARSE,
-                   "empty identifier");
-      return NULL;
-    }
+    return NULL;
 
   spec = g_hash_table_lookup (parser->props, name);
   if (spec == NULL)
     {
-      g_set_error (&parser->error,
+      g_set_error (error,
                    G_MARKUP_ERROR, G_MARKUP_ERROR_PARSE,
                    "unknown field: '%s'", name);
       return NULL;
@@ -859,21 +819,21 @@ parse_condition (BoltQueryParser *parser)
   c->field = g_param_spec_ref (spec);
   g_value_init (&c->val, c->field->value_type);
 
-  ok = parser_expect (parser, ':');
+  ok = parser_expect (parser, ':', error);
 
   if (!ok)
     return NULL;
 
   if (G_IS_PARAM_SPEC_STRING (spec))
-    ok = parse_value_str (parser, c);
+    ok = parse_value_str (parser, c, error);
   else if (bolt_param_is_int (spec))
-    ok = parse_value_int (parser, c);
+    ok = parse_value_int (parser, c, error);
   else if (G_IS_PARAM_SPEC_ENUM (spec))
-    ok = parse_value_enum (parser, c);
+    ok = parse_value_enum (parser, c, error);
   else if (G_IS_PARAM_SPEC_FLAGS (spec))
-    ok = parse_value_flags (parser, c);
+    ok = parse_value_flags (parser, c, error);
   else
-    ok = unsupported_value (parser, c);
+    ok = unsupported_value (parser, c, error);
   /*  */
 
   if (!ok)
@@ -882,7 +842,7 @@ parse_condition (BoltQueryParser *parser)
   if (!g_value_type_compatible (c->field->value_type,
                                 G_VALUE_TYPE (&c->val)))
     {
-      g_set_error (&parser->error,
+      g_set_error (error,
                    G_MARKUP_ERROR, G_MARKUP_ERROR_PARSE,
                    "value '%s' incompatible with field: '%s' (%s)",
                    g_type_name (G_VALUE_TYPE (&c->val)),
@@ -895,19 +855,20 @@ parse_condition (BoltQueryParser *parser)
 }
 
 static Expr *
-parse_not (BoltQueryParser *parser)
+parse_not (BoltQueryParser *parser,
+           GError         **error)
 {
   Unary *op;
   Expr *exp = NULL;
   gboolean ok;
 
-  ok = parser_expect (parser, '-');
+  ok = parser_expect (parser, '-', error);
   if (!ok)
     return NULL;
 
   g_debug ("not");
 
-  exp = parse_term (parser);
+  exp = parse_term (parser, error);
   if (!exp)
     return NULL;
 
@@ -918,23 +879,24 @@ parse_not (BoltQueryParser *parser)
 }
 
 static Expr *
-parse_group (BoltQueryParser *parser)
+parse_group (BoltQueryParser *parser,
+             GError         **error)
 {
   g_autoptr(Expr) exp = NULL;
   gboolean ok;
 
-  ok = parser_expect (parser, '(');
+  ok = parser_expect (parser, '(', error);
   if (!ok)
     return FALSE;
 
   g_debug ("group");
-  exp = parse_expression (parser);
+  exp = parse_expression (parser, error);
   g_debug ("group exp done: %d", (int) ok);
 
   if (!exp)
     return NULL;
 
-  ok = parser_expect (parser, ')');
+  ok = parser_expect (parser, ')', error);
   if (!ok)
     return FALSE;
 
@@ -943,27 +905,29 @@ parse_group (BoltQueryParser *parser)
 }
 
 static Expr *
-parse_term (BoltQueryParser *parser)
+parse_term (BoltQueryParser *parser,
+            GError         **error)
 {
   g_debug ("term");
 
   if (parser_check (parser, '('))
-    return parse_group (parser);
+    return parse_group (parser, error);
   else if (parser_check (parser, '-'))
-    return parse_not (parser);
+    return parse_not (parser, error);
   else
-    return parse_condition (parser);
+    return parse_condition (parser, error);
 
   g_assert_not_reached ();
   return NULL;
 }
 
 static Expr *
-parse_or (BoltQueryParser *parser)
+parse_or (BoltQueryParser *parser,
+           GError         **error)
 {
   gboolean ok;
 
-  ok = parser_expect (parser, '|');
+  ok = parser_expect (parser, '|', error);
   if (!ok)
     return NULL;
 
@@ -983,7 +947,8 @@ parse_and (BoltQueryParser *parser)
 }
 
 static Expr *
-parse_expression (BoltQueryParser *parser)
+parse_expression (BoltQueryParser *parser,
+                  GError         **error)
 {
   g_autoptr(Expr) op = NULL;
   g_autoptr(Expr) lhs = NULL;
@@ -993,14 +958,14 @@ parse_expression (BoltQueryParser *parser)
 
   g_debug ("expression term");
 
-  lhs = parse_term (parser);
+  lhs = parse_term (parser, error);
   if (!lhs)
     return NULL;
 
   ok = parser_skip (parser, ' ');
 
   if (parser_check (parser, '|'))
-    op = parse_or (parser);
+    op = parse_or (parser, error);
   else if (parser_check (parser, '&') || ok)
     op = parse_and (parser);
   else
@@ -1011,7 +976,7 @@ parse_expression (BoltQueryParser *parser)
 
   parser_skip (parser, ' ');
 
-  rhs = parse_expression (parser);
+  rhs = parse_expression (parser, error);
   if (rhs == NULL)
     return NULL;
 
@@ -1044,19 +1009,19 @@ bolt_query_parser_parse_string (BoltQueryParser *parser,
   g_scanner_input_text (parser->scanner, data, (guint) length);
   g_scanner_set_scope (parser->scanner, QL_SCOPE_DEFAULT);
 
-  exp = parse_expression (parser);
+  exp = parse_expression (parser, error);
   if (!exp)
     {
-      *error = g_error_copy (parser->error);
+      if (error != NULL && *error == NULL)
+        g_set_error (error, G_MARKUP_ERROR, G_MARKUP_ERROR_PARSE,
+                     "malformed input @ %u: unexpected data",
+                     parser->scanner->position);
       return exp;
     }
 
-  ok = parser_expect (parser, G_TOKEN_EOF);
+  ok = parser_expect (parser, G_TOKEN_EOF, error);
   if (!ok)
-    {
-      *error = g_error_copy (parser->error);
-      return NULL;
-    }
+    return NULL;
 
   return g_steal_pointer (&exp);
 }
