@@ -748,16 +748,6 @@ parse_value_str (BoltQueryParser *parser,
   const char *str;
 
   str = parser_next_string (parser);
-
-  if (str == NULL)
-    {
-      g_set_error (&parser->error,
-                   G_MARKUP_ERROR, G_MARKUP_ERROR_PARSE,
-                   "malformed input @ %u: unexpected token: %u",
-                   parser->scanner->position, parser_token (parser));
-      return FALSE;
-    }
-
   g_value_set_string (&cond->val, str);
 
   return TRUE;
@@ -776,13 +766,7 @@ parse_value_enum (BoltQueryParser *parser,
   str = parser_next_string (parser);
 
   if (str == NULL)
-    {
-      g_set_error (&parser->error,
-                   G_MARKUP_ERROR, G_MARKUP_ERROR_PARSE,
-                   "malformed input @ %u: unexpected token: %u",
-                   parser->scanner->position, parser_token (parser));
-      return FALSE;
-    }
+    return FALSE;
 
   ok = bolt_enum_class_from_string (enum_spec->enum_class,
                                     str,
@@ -808,13 +792,7 @@ parse_value_flags (BoltQueryParser *parser,
   str = parser_next_string (parser);
 
   if (str == NULL)
-    {
-      g_set_error (&parser->error,
-                   G_MARKUP_ERROR, G_MARKUP_ERROR_PARSE,
-                   "malformed input @ %u: unexpected token: %u",
-                   parser->scanner->position, parser_token (parser));
-      return FALSE;
-    }
+    return FALSE;
 
   ok = bolt_flags_class_from_string (flags_spec->flags_class,
                                     str,
