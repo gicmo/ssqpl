@@ -525,6 +525,34 @@ parser_value (BoltQueryParser *parser)
   return &parser->scanner->value;
 }
 
+static inline GTokenType
+parser_token (BoltQueryParser *parser)
+{
+  return parser->scanner->token;
+}
+
+static const char *
+parser_next_string (BoltQueryParser *parser)
+{
+  GTokenType  token;
+  GTokenValue *value;
+  const char  *str;
+
+  token = parser_next (parser);
+
+  if (token != G_TOKEN_STRING && token != G_TOKEN_IDENTIFIER)
+    return NULL;
+
+  value = parser_value (parser);
+
+  if (token == G_TOKEN_STRING)
+    str = value->v_string;
+  else
+    str = value->v_identifier;
+
+  return str;
+}
+
 /**
  * parser_expect:
  * @parser: The parser
@@ -711,30 +739,21 @@ parse_value_enum (BoltQueryParser *parser,
                   Condition       *cond)
 {
   GParamSpecEnum *enum_spec;
-  GTokenType  token;
-  GTokenValue *value;
   const char *str;
   gboolean ok;
   gint val;
 
-  enum_spec  = G_PARAM_SPEC_ENUM (cond->field);
-  token = parser_next (parser);
+  enum_spec = G_PARAM_SPEC_ENUM (cond->field);
+  str = parser_next_string (parser);
 
-  if (token != G_TOKEN_STRING && token != G_TOKEN_IDENTIFIER)
+  if (str == NULL)
     {
       g_set_error (&parser->error,
                    G_MARKUP_ERROR, G_MARKUP_ERROR_PARSE,
                    "malformed input @ %u: unexpected token: %u",
-                   parser->scanner->position, token);
+                   parser->scanner->position, parser_token (parser));
       return FALSE;
     }
-
-  value = parser_value (parser);
-
-  if (token == G_TOKEN_STRING)
-    str = value->v_string;
-  else
-    str = value->v_identifier;
 
   ok = bolt_enum_class_from_string (enum_spec->enum_class,
                                     str,
@@ -752,31 +771,21 @@ parse_value_flags (BoltQueryParser *parser,
                    Condition       *cond)
 {
   GParamSpecFlags *flags_spec;
-  GTokenType  token;
-  GTokenValue *value;
   const char *str;
   gboolean ok;
   guint val;
 
   flags_spec = G_PARAM_SPEC_FLAGS (cond->field);
+  str = parser_next_string (parser);
 
-  token = parser_next (parser);
-
-  if (token != G_TOKEN_STRING && token != G_TOKEN_IDENTIFIER)
+  if (str == NULL)
     {
       g_set_error (&parser->error,
                    G_MARKUP_ERROR, G_MARKUP_ERROR_PARSE,
                    "malformed input @ %u: unexpected token: %u",
-                   parser->scanner->position, token);
+                   parser->scanner->position, parser_token (parser));
       return FALSE;
     }
-
-  value = parser_value (parser);
-
-  if (token == G_TOKEN_STRING)
-    str = value->v_string;
-  else
-    str = value->v_identifier;
 
   ok = bolt_flags_class_from_string (flags_spec->flags_class,
                                     str,
@@ -791,7 +800,6 @@ parse_value_flags (BoltQueryParser *parser,
 
   return ok;
 }
-
 
 static gboolean
 parse_value (BoltQueryParser *parser, GValue *val)
