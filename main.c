@@ -829,6 +829,27 @@ unsupported_value (BoltQueryParser *parser,
   return FALSE;
 }
 
+static gboolean
+parse_value (BoltQueryParser *parser,
+             Condition       *c,
+             GError         **error)
+{
+    gboolean ok;
+
+    if (G_IS_PARAM_SPEC_STRING (c->field))
+      ok = parse_value_str (parser, c, error);
+    else if (bolt_param_is_int (c->field))
+      ok = parse_value_int (parser, c, error);
+    else if (G_IS_PARAM_SPEC_ENUM (c->field))
+      ok = parse_value_enum (parser, c, error);
+    else if (G_IS_PARAM_SPEC_FLAGS (c->field))
+      ok = parse_value_flags (parser, c, error);
+    else
+      ok = unsupported_value (parser, c, error);
+
+    return ok;
+}
+
 static Expr * parse_term (BoltQueryParser *parser, GError **error);
 static Expr * parse_expression (BoltQueryParser *parser, GError **error);
 
@@ -845,22 +866,10 @@ parse_condition (BoltQueryParser *parser, GError **error)
     return NULL;
 
   ok = parser_expect (parser, ':', error);
-
   if (!ok)
     return NULL;
 
-  if (G_IS_PARAM_SPEC_STRING (c->field))
-    ok = parse_value_str (parser, c, error);
-  else if (bolt_param_is_int (c->field))
-    ok = parse_value_int (parser, c, error);
-  else if (G_IS_PARAM_SPEC_ENUM (c->field))
-    ok = parse_value_enum (parser, c, error);
-  else if (G_IS_PARAM_SPEC_FLAGS (c->field))
-    ok = parse_value_flags (parser, c, error);
-  else
-    ok = unsupported_value (parser, c, error);
-  /*  */
-
+  ok = parse_value (parser, c, error);
   if (!ok)
     return NULL;
 
