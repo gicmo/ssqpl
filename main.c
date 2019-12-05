@@ -648,6 +648,39 @@ parser_skip (BoltQueryParser *parser, int token)
 /* production rules */
 
 static gboolean
+parse_field (BoltQueryParser *parser,
+             Condition       *cond,
+             GError         **error)
+{
+  const char *name;
+  GParamSpec *spec;
+  gboolean ok;
+
+  ok = parser_expect (parser, G_TOKEN_IDENTIFIER, error);
+  if (!ok)
+    return FALSE;
+
+  name = parser_value (parser)->v_identifier;
+
+  if (name == NULL)
+    return FALSE;
+
+  spec = g_hash_table_lookup (parser->props, name);
+  if (spec == NULL)
+    {
+      g_set_error (error,
+                   G_MARKUP_ERROR, G_MARKUP_ERROR_PARSE,
+                   "unknown field: '%s'", name);
+      return FALSE;
+    }
+
+  cond->field = g_param_spec_ref (spec);
+  g_value_init (&cond->val, spec->value_type);
+
+  return TRUE;
+}
+
+static gboolean
 parse_value_int (BoltQueryParser *parser,
                  Condition       *cond,
                  GError         **error)
@@ -803,45 +836,26 @@ static Expr *
 parse_condition (BoltQueryParser *parser, GError **error)
 {
   g_autoptr(Condition) c = condition_new ();
-  const char *name;
-  GParamSpec *spec;
   gboolean ok;
 
   g_debug ("condition");
 
-  ok = parser_expect (parser, G_TOKEN_IDENTIFIER, error);
+  ok = parse_field (parser, c, error);
   if (!ok)
     return NULL;
-
-  name = parser_value (parser)->v_identifier;
-
-  if (name == NULL)
-    return NULL;
-
-  spec = g_hash_table_lookup (parser->props, name);
-  if (spec == NULL)
-    {
-      g_set_error (error,
-                   G_MARKUP_ERROR, G_MARKUP_ERROR_PARSE,
-                   "unknown field: '%s'", name);
-      return NULL;
-    }
-
-  c->field = g_param_spec_ref (spec);
-  g_value_init (&c->val, c->field->value_type);
 
   ok = parser_expect (parser, ':', error);
 
   if (!ok)
     return NULL;
 
-  if (G_IS_PARAM_SPEC_STRING (spec))
+  if (G_IS_PARAM_SPEC_STRING (c->field))
     ok = parse_value_str (parser, c, error);
-  else if (bolt_param_is_int (spec))
+  else if (bolt_param_is_int (c->field))
     ok = parse_value_int (parser, c, error);
-  else if (G_IS_PARAM_SPEC_ENUM (spec))
+  else if (G_IS_PARAM_SPEC_ENUM (c->field))
     ok = parse_value_enum (parser, c, error);
-  else if (G_IS_PARAM_SPEC_FLAGS (spec))
+  else if (G_IS_PARAM_SPEC_FLAGS (c->field))
     ok = parse_value_flags (parser, c, error);
   else
     ok = unsupported_value (parser, c, error);
