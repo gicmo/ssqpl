@@ -850,18 +850,6 @@ parse_condition (BoltQueryParser *parser, GError **error)
   if (!ok)
     return NULL;
 
-  if (!g_value_type_compatible (c->field->value_type,
-                                G_VALUE_TYPE (&c->val)))
-    {
-      g_set_error (error,
-                   G_MARKUP_ERROR, G_MARKUP_ERROR_PARSE,
-                   "value '%s' incompatible with field: '%s' (%s)",
-                   g_type_name (G_VALUE_TYPE (&c->val)),
-                   c->field->name,
-                   g_type_name (c->field->value_type));
-      return NULL;
-    }
-
   return (Expr *) g_steal_pointer (&c);
 }
 
