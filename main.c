@@ -11,9 +11,13 @@
 
 /*  */
 
-typedef gint (*BoltParamValueCmp) (GParamSpec   *pspec,
-                                   const GValue *a,
-                                   const GValue *b);
+typedef gint     (*BoltParamValueCmp) (GParamSpec   *pspec,
+                                       const GValue *a,
+                                       const GValue *b);
+
+typedef gboolean (*BoltParamValueEval) (GParamSpec   *pspec,
+                                        const GValue *a,
+                                        const GValue *b);
 
 /*  */
 gboolean
@@ -201,6 +205,9 @@ bolt_query_parser_class_init (BoltQueryParserClass *klass)
 }
 
 /* */
+
+
+/* */
 static gint
 flags_cmp (GParamSpec   *pspec G_GNUC_UNUSED,
            const GValue *have,
@@ -248,7 +255,8 @@ struct Condition {
   GValue      val;
 
   /* optional */
-  BoltParamValueCmp cmp;
+  BoltParamValueEval eval;
+  BoltParamValueCmp  cmp;
 };
 
 struct Unary {
@@ -311,6 +319,9 @@ condition_eval (Expr *exp, GObject *obj)
   int r;
 
   g_object_get_property (obj, c->field->name, &val);
+
+  if (c->eval)
+    return c->eval (c->field, &c->val, &val);
 
   if (c->cmp)
     r = c->cmp (c->field, &c->val, &val);
