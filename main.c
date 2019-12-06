@@ -951,17 +951,17 @@ static Expr *
 parse_term (BoltQueryParser *parser,
             GError         **error)
 {
+  Expr *res;
   g_debug ("term");
 
   if (parser_check (parser, '('))
-    return parse_group (parser, error);
+    res = parse_group (parser, error);
   else if (parser_check (parser, '-'))
-    return parse_not (parser, error);
+    res = parse_not (parser, error);
   else
-    return parse_condition (parser, error);
+    res = parse_condition (parser, error);
 
-  g_assert_not_reached ();
-  return NULL;
+  return res;
 }
 
 static Expr *
