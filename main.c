@@ -702,6 +702,38 @@ parse_field (BoltQueryParser *parser,
 }
 
 static gboolean
+parse_value_bool (BoltQueryParser *parser,
+                  Condition       *cond,
+                  GError         **error)
+{
+  gboolean ok;
+  const char *str;
+
+  ok = parser_expect (parser, G_TOKEN_IDENTIFIER, error);
+  if (!ok)
+    return FALSE;
+
+  str = parser_value (parser)->v_identifier;
+
+  if (!g_strcmp0 (str, "true"))
+    {
+      g_value_set_boolean (&cond->val, TRUE);
+      return TRUE;
+    }
+  else if (!g_strcmp0 (str, "false"))
+    {
+      g_value_set_boolean (&cond->val, FALSE);
+      return TRUE;
+    }
+
+  g_set_error (error,
+               G_MARKUP_ERROR, G_MARKUP_ERROR_PARSE,
+               "malformed input @ %u: expected boolean, got '%s'",
+               parser->scanner->position, str);
+  return FALSE;
+}
+
+static gboolean
 parse_value_int (BoltQueryParser *parser,
                  Condition       *cond,
                  GError         **error)
@@ -857,7 +889,9 @@ parse_value (BoltQueryParser *parser,
 {
     gboolean ok;
 
-    if (G_IS_PARAM_SPEC_STRING (c->field))
+    if (G_IS_PARAM_SPEC_BOOLEAN (c->field))
+      ok = parse_value_bool(parser, c, error);
+    else if (G_IS_PARAM_SPEC_STRING (c->field))
       ok = parse_value_str (parser, c, error);
     else if (bolt_param_is_int (c->field))
       ok = parse_value_int (parser, c, error);
@@ -1101,6 +1135,8 @@ G_DEFINE_TYPE (BtId, bt_id, G_TYPE_OBJECT)
 
 enum {
   PROP_ID_0,
+  PROP_TRUE,
+  PROP_FALSE,
   PROP_ID,
   PROP_INT,
   PROP_ENUM,
@@ -1125,6 +1161,14 @@ bt_id_get_property (GObject    *object,
 {
   switch (prop_id)
     {
+    case PROP_TRUE:
+      g_value_set_boolean (value, TRUE);
+      break;
+
+    case PROP_FALSE:
+      g_value_set_boolean (value, FALSE);
+      break;
+
     case PROP_ID:
       g_value_set_string (value, "bolt-id");
       break;
@@ -1152,6 +1196,20 @@ bt_id_class_init (BtIdClass *klass)
   GObjectClass *gobject_class = G_OBJECT_CLASS (klass);
 
   gobject_class->get_property = bt_id_get_property;
+
+  id_props[PROP_TRUE] =
+    g_param_spec_boolean ("b-true", "BooleanTrue", NULL,
+                          TRUE,
+                          G_PARAM_READABLE |
+                          G_PARAM_STATIC_NICK |
+                          G_PARAM_STATIC_BLURB);
+
+  id_props[PROP_FALSE] =
+    g_param_spec_boolean ("b-false", "BooleanFalse", NULL,
+                          FALSE,
+                          G_PARAM_READABLE |
+                          G_PARAM_STATIC_NICK |
+                          G_PARAM_STATIC_BLURB);
 
   id_props[PROP_ID] =
     g_param_spec_string ("id", "Id", NULL,
