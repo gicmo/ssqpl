@@ -155,6 +155,12 @@ static GScannerConfig parser_config =
 enum
 {
   QL_TOKEN_INVALID = G_TOKEN_LAST,
+  QL_TOKEN_REL_EQUAL = ':',
+  QL_TOKEN_GROUP_START = '(',
+  QL_TOKEN_GROUP_END = ')',
+  QL_TOKEN_OP_NOT = '-',
+  QL_TOKEN_OP_AND = '&',
+  QL_TOKEN_OP_OR = '|',
   QL_TOKEN_LAST
 };
 
@@ -194,6 +200,21 @@ bolt_query_parser_init (BoltQueryParser *parser)
   parser->props = g_hash_table_new_full (g_str_hash, g_str_equal,
                                          (GDestroyNotify) g_free,
                                          (GDestroyNotify) g_param_spec_unref);
+
+  g_scanner_scope_add_symbol (parser->scanner,
+                              QL_SCOPE_DEFAULT,
+                              "NOT",
+                              GINT_TO_POINTER (QL_TOKEN_OP_NOT));
+
+  g_scanner_scope_add_symbol (parser->scanner,
+                              QL_SCOPE_DEFAULT,
+                              "AND",
+                              GINT_TO_POINTER (QL_TOKEN_OP_AND));
+
+  g_scanner_scope_add_symbol (parser->scanner,
+                              QL_SCOPE_DEFAULT,
+                              "OR",
+                              GINT_TO_POINTER (QL_TOKEN_OP_OR));
 }
 
 static void
@@ -563,8 +584,8 @@ parser_expect (BoltQueryParser *parser, int token, GError **error)
     return TRUE;
 
   g_set_error (error, G_MARKUP_ERROR, G_MARKUP_ERROR_PARSE,
-               "malformed input @ %u: unexpected token: %u",
-               parser->scanner->position, token);
+               "malformed input @ %u: expected %u, got %u",
+               parser->scanner->position, token, next);
 
   return FALSE;
 }
